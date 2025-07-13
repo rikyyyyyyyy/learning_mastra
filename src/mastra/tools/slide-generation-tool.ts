@@ -17,7 +17,7 @@ export const slideGenerationTool = createTool({
     message: z.string().describe('ステータスメッセージ'),
     estimatedTime: z.string().describe('推定完了時間'),
   }),
-  execute: async ({ context, mastra, runtimeContext }) => {
+  execute: async ({ context, runtimeContext }) => {
     const { topic, slideCount = 5, style = 'modern', language = 'ja' } = context;
     
     // ジョブIDを生成（タイムスタンプ + ランダム文字列）

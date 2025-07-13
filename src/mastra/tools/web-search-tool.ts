@@ -16,7 +16,7 @@ export const webSearchTool = createTool({
     message: z.string().describe('ステータスメッセージ'),
     estimatedTime: z.string().describe('推定完了時間'),
   }),
-  execute: async ({ context, mastra, runtimeContext }) => {
+  execute: async ({ context, runtimeContext }) => {
     const { query, maxResults = 5, language = 'ja' } = context;
     
     // ジョブIDを生成（タイムスタンプ + ランダム文字列）

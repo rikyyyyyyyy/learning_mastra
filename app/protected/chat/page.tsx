@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Loader2, MessageSquarePlus, Eye, X } from "lucide-react";
+import { Send, Bot, User, Loader2, MessageSquarePlus, Eye, X, ChevronDown } from "lucide-react";
 
 interface Message {
   id: string;
@@ -9,6 +9,36 @@ interface Message {
   content: string;
   timestamp: Date;
 }
+
+type AIModel = "claude-sonnet-4" | "openai-o3" | "gemini-2.5-flash";
+
+interface ModelInfo {
+  id: AIModel;
+  name: string;
+  provider: string;
+  description: string;
+}
+
+const AI_MODELS: ModelInfo[] = [
+  {
+    id: "claude-sonnet-4",
+    name: "Claude Sonnet 4",
+    provider: "Anthropic",
+    description: "高度な推論と創造的なタスクに最適"
+  },
+  {
+    id: "openai-o3",
+    name: "OpenAI o3",
+    provider: "OpenAI",
+    description: "最新の高性能推論モデル"
+  },
+  {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    provider: "Google",
+    description: "高速・低コストで思考機能搭載"
+  }
+];
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([
@@ -21,6 +51,8 @@ export default function ChatPage() {
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<AIModel>("claude-sonnet-4");
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showSlidePreview, setShowSlidePreview] = useState(false);
   const [currentSlidePreview, setCurrentSlidePreview] = useState<{
     jobId: string;
@@ -45,7 +77,15 @@ export default function ChatPage() {
 
 
   // スライドプレビューを表示する関数
-  const showSlidePreviewModal = (previewData: any) => {
+  const showSlidePreviewModal = (previewData: {
+    jobId: string;
+    htmlCode: string;
+    slideInfo?: {
+      topic?: string;
+      slideCount?: number;
+      style?: string;
+    };
+  }) => {
     setCurrentSlidePreview(previewData);
     setShowSlidePreview(true);
   };
@@ -162,6 +202,7 @@ export default function ChatPage() {
         body: JSON.stringify({
           message: inputValue,
           threadId: threadIdRef.current, // threadIdを送信
+          model: selectedModel, // 選択されたモデルを送信
         }),
       });
 
@@ -302,13 +343,57 @@ export default function ChatPage() {
               AI アシスタント
             </h1>
           </div>
-          <button
-            onClick={startNewConversation}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
-          >
-            <MessageSquarePlus className="w-5 h-5" />
-            新しい会話
-          </button>
+          <div className="flex items-center gap-3">
+            {/* モデル選択ドロップダウン */}
+            <div className="relative">
+              <button
+                onClick={() => setShowModelDropdown(!showModelDropdown)}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg transition-colors"
+              >
+                <span className="text-sm">
+                  {AI_MODELS.find(m => m.id === selectedModel)?.name}
+                </span>
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              
+              {showModelDropdown && (
+                <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-10">
+                  {AI_MODELS.map((model) => (
+                    <button
+                      key={model.id}
+                      onClick={() => {
+                        setSelectedModel(model.id);
+                        setShowModelDropdown(false);
+                      }}
+                      className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {model.name}
+                          </div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                            {model.provider} - {model.description}
+                          </div>
+                        </div>
+                        {selectedModel === model.id && (
+                          <div className="w-2 h-2 bg-purple-600 rounded-full" />
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <button
+              onClick={startNewConversation}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+            >
+              <MessageSquarePlus className="w-5 h-5" />
+              新しい会話
+            </button>
+          </div>
         </div>
       </div>
 

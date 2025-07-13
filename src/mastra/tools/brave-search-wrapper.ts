@@ -3,7 +3,15 @@ import { z } from 'zod';
 import { getBraveMCPClient } from '../mcp/brave-mcp-client';
 
 // MCPツールを取得してキャッシュ
-let mcpTools: Record<string, any> | null = null;
+interface MCPTool {
+  execute: (params: {
+    context: Record<string, unknown>;
+    mastra?: unknown;
+    runtimeContext?: unknown;
+  }) => Promise<unknown>;
+}
+
+let mcpTools: Record<string, MCPTool> | null = null;
 
 async function getMCPTools() {
   if (mcpTools) {

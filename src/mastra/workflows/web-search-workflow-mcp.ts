@@ -46,7 +46,7 @@ const braveMCPSearchStep = createStep({
       
       // 検索結果をパース
       let searchResults = [];
-      let rawResults = result.searchResults;
+      const rawResults = result.searchResults;
       
       if (result.success) {
         try {
@@ -56,7 +56,7 @@ const braveMCPSearchStep = createStep({
             // JSONパースを試みる
             try {
               parsedData = JSON.parse(result.searchResults);
-            } catch (jsonError) {
+            } catch {
               // JSONパースに失敗した場合、テキスト形式として処理
               console.log('📝 テキスト形式の検索結果をパース中...');
               const textResults = result.searchResults;
@@ -86,7 +86,7 @@ const braveMCPSearchStep = createStep({
                   snippet: description,
                   age: '',
                 };
-              }).filter((result: any) => result.title && result.url); // 有効な結果のみ保持
+              }).filter((result: { title: string; url: string; snippet: string; age: string }) => result.title && result.url); // 有効な結果のみ保持
               
               console.log(`📊 テキストから${searchResults.length}件の結果を抽出`);
             }
@@ -100,7 +100,7 @@ const braveMCPSearchStep = createStep({
             
             // Brave Search APIの結果構造に対応
             if (parsedData.web?.results) {
-              searchResults = parsedData.web.results.map((result: any) => ({
+              searchResults = parsedData.web.results.map((result: { title?: string; url?: string; description?: string; age?: string }) => ({
                 title: result.title || '',
                 url: result.url || '',
                 snippet: result.description || '',
@@ -109,7 +109,7 @@ const braveMCPSearchStep = createStep({
             }
             // resultsが直接ある場合
             else if (Array.isArray(parsedData.results)) {
-              searchResults = parsedData.results.map((result: any) => ({
+              searchResults = parsedData.results.map((result: { title?: string; url?: string; description?: string; snippet?: string; age?: string }) => ({
                 title: result.title || '',
                 url: result.url || '',
                 snippet: result.description || result.snippet || '',
@@ -118,7 +118,7 @@ const braveMCPSearchStep = createStep({
             }
             // 配列が直接返される場合
             else if (Array.isArray(parsedData)) {
-              searchResults = parsedData.map((result: any) => ({
+              searchResults = parsedData.map((result: { title?: string; url?: string; description?: string; snippet?: string; age?: string }) => ({
                 title: result.title || '',
                 url: result.url || '',
                 snippet: result.description || result.snippet || '',
@@ -283,7 +283,7 @@ ${index + 1}. ${result.title}
       let evaluation;
       try {
         evaluation = JSON.parse(text);
-      } catch (e) {
+      } catch {
         // JSON解析失敗時のフォールバック
         evaluation = {
           validationScore: searchResults.length > 0 ? 60 : 30,
@@ -417,7 +417,7 @@ ${index + 1}. ${result.title}
         try {
           const domains = new Set(searchResults.map(result => new URL(result.url).hostname));
           keyInsights.push(`情報源の多様性: ${domains.size}個のドメイン`);
-        } catch (e) {
+        } catch {
           keyInsights.push('情報源の多様性: 分析不可');
         }
       }
@@ -440,7 +440,7 @@ ${index + 1}. ${result.title}
         try {
           const domains = new Set(searchResults.map(result => new URL(result.url).hostname));
           reliabilityScore += Math.min(10, domains.size * 2);
-        } catch (e) {
+        } catch {
           // URL解析エラーの場合はボーナスなし
         }
       }
