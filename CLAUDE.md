@@ -13,7 +13,7 @@ npm run lint       # Run ESLint
 ```
 
 ### Package Management
-This project uses npm. All dependencies are managed through `package.json`.
+This project supports both npm and pnpm. All dependencies are managed through `package.json`.
 
 ## Architecture Overview
 
@@ -30,11 +30,17 @@ This is a **Mastra-based AI Assistant** built with Next.js that provides web sea
    - All long-running operations return job IDs immediately
    - Jobs transition through states: queued → running → completed/failed
    - Results are fetched via job ID when ready
+   - Job results stored in `.job-results` directory
 
 3. **Memory Management**
-   - Thread-based conversation memory using LibSQL
+   - Thread-based conversation memory using LibSQL (in-memory by default)
    - User isolation for security
    - Shared memory between agents within a thread
+
+4. **Authentication System**
+   - Supabase authentication with middleware session management
+   - Protected routes under `/protected/*`
+   - Complete auth flow (login, signup, forgot password, email confirmation)
 
 ### Key Components
 
@@ -44,7 +50,8 @@ This is a **Mastra-based AI Assistant** built with Next.js that provides web sea
 
 **Mastra Configuration:**
 - `/src/mastra/index.ts`: Central Mastra instance configuration
-- Integrates OpenAI, Anthropic, and Google AI models
+- Integrates OpenAI (GPT-4o Search Preview), Anthropic (Claude Sonnet 4), and Google AI models
+- MCP (Model Context Protocol) support for Brave search
 - Configures agents, tools, workflows, and memory
 
 **Agent Implementation Pattern:**
@@ -53,6 +60,7 @@ All agents follow this structure:
 - Have access to specific tools
 - Share thread memory
 - Return streaming responses
+- Japanese language instructions by default
 
 **Tool Implementation Pattern:**
 Tools must:
@@ -60,14 +68,31 @@ Tools must:
 - Queue jobs for long-running operations
 - Return job IDs for status tracking
 - Handle errors gracefully
+- Use `setTimeout(() => {...}, 0)` for background execution
+- Handle circular dependencies with dynamic imports
+
+**Workflow Implementation Pattern:**
+- Use `createWorkflow` and `createStep` from Mastra
+- Chain steps with `.then()`
+- Define input/output schemas using Zod
+- Implement error handling at each step
+- Track progress via workflow events
 
 ### Environment Setup
 
-Required environment variables:
+Required environment variables (see `.env.local.example`):
 ```
+# AI Provider Keys
 OPENAI_API_KEY=your_key
+ANTHROPIC_API_KEY=your_key
+GOOGLE_GENERATIVE_AI_API_KEY=your_key
+
+# Supabase
 NEXT_PUBLIC_SUPABASE_URL=your_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_key
+
+# Brave Search (MCP)
+BRAVE_API_KEY=your_key
 ```
 
 ### Testing Approach
@@ -79,26 +104,38 @@ No specific test framework is configured. When implementing tests:
 
 ### UI Components
 
-Uses **shadcn/ui** with New York style theme. When adding components:
+Uses **shadcn/ui** with New York style theme and Lucide icons. When adding components:
 1. Use existing shadcn/ui components when possible
 2. Follow the established styling patterns in `/components/ui/`
 3. Maintain dark mode compatibility
+4. Use responsive design with Tailwind CSS
 
 ### Common Development Tasks
 
 **Adding a new tool:**
 1. Create tool file in `/src/mastra/tools/`
-2. Implement job queuing pattern
+2. Implement job queuing pattern (return within 100ms)
 3. Register in `/src/mastra/index.ts`
 4. Add to relevant agents
+5. Handle circular dependencies if needed
 
 **Adding a new workflow:**
 1. Create workflow file in `/src/mastra/workflows/`
-2. Define steps with proper error handling
+2. Define steps with proper error handling and Zod schemas
 3. Register in `/src/mastra/index.ts`
 4. Create corresponding tool to trigger it
+5. Implement progress tracking
 
 **Modifying chat behavior:**
 1. Primary logic is in `/src/mastra/agents/general-agent.ts`
 2. Chat UI is in `/app/protected/chat/page.tsx`
 3. Streaming logic is in `/app/api/chat/route.ts`
+4. Thread management in chat components
+
+### Important Implementation Notes
+
+- **GPT-4o Search Preview** doesn't support temperature parameter
+- **Slide preview tool** must be called after slide generation for HTML preview
+- **MCP tools** are wrapped as Mastra tools for consistency
+- **Logging** uses PinoLogger for structured output
+- **TypeScript** strict mode is enabled with path alias `@/*`
