@@ -41,9 +41,16 @@ export async function updateSession(request: NextRequest) {
 
   // IMPORTANT: DO NOT REMOVE auth.getUser()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    user = authUser;
+  } catch (error) {
+    console.error("Supabase auth error:", error);
+    // エラーが発生してもミドルウェアは続行
+  }
 
   if (
     request.nextUrl.pathname !== "/" &&
