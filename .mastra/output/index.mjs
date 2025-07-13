@@ -23,8 +23,6 @@ import '@mastra/core/mastra';
 import '@mastra/loggers';
 import '@mastra/libsql';
 import '@mastra/core/workflows';
-import './tools/f55f74d0-259b-40f7-8cff-7623a7a76009.mjs';
-import '@mastra/mcp';
 import '@ai-sdk/anthropic';
 import '@mastra/memory';
 import './tools/7c1d5b02-a84e-4a2c-a603-71ea57a3d35a.mjs';
@@ -36,6 +34,8 @@ import 'path';
 import './tools/702498af-6cf2-4809-848f-94aa7e82fd05.mjs';
 import './tools/950a7c10-a632-40c1-81ca-96413e7652b6.mjs';
 import './tools/d66355fc-d2a0-46c9-8e57-17de7be2b41e.mjs';
+import './tools/f55f74d0-259b-40f7-8cff-7623a7a76009.mjs';
+import '@mastra/mcp';
 
 // src/utils/filepath.ts
 var getFilePath = (options) => {

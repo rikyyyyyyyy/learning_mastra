@@ -3,7 +3,6 @@ import { PinoLogger } from '@mastra/loggers';
 import { LibSQLStore } from '@mastra/libsql';
 import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
-import { braveMCPSearchTool } from './tools/f55f74d0-259b-40f7-8cff-7623a7a76009.mjs';
 import { anthropic } from '@ai-sdk/anthropic';
 import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
@@ -15,10 +14,11 @@ import { slideGenerationTool } from './tools/702498af-6cf2-4809-848f-94aa7e82fd0
 import { slidePreviewTool } from './tools/950a7c10-a632-40c1-81ca-96413e7652b6.mjs';
 import { jobStatusTool } from './tools/b0d9adbf-1685-4da8-a5b5-c772a7b99734.mjs';
 import { jobResultTool } from './tools/d66355fc-d2a0-46c9-8e57-17de7be2b41e.mjs';
+import { braveMCPSearchTool } from './tools/f55f74d0-259b-40f7-8cff-7623a7a76009.mjs';
 import '@mastra/core/tools';
-import '@mastra/mcp';
 import 'fs';
 import 'path';
+import '@mastra/mcp';
 
 const forecastSchema = z.object({
   date: z.string(),
@@ -168,9 +168,9 @@ const weatherWorkflow = createWorkflow({
 }).then(fetchWeather).then(planActivities);
 weatherWorkflow.commit();
 
-const braveMCPSearchStep = createStep({
-  id: "brave-mcp-search",
-  description: "Brave MCP\u3092\u4F7F\u7528\u3057\u3066Web\u691C\u7D22\u3092\u5B9F\u884C\u3057\u307E\u3059",
+const geminiSearchStep = createStep({
+  id: "gemini-search",
+  description: "Gemini Flash\u306EGoogle Search grounding\u3092\u4F7F\u7528\u3057\u3066Web\u691C\u7D22\u3092\u5B9F\u884C\u3057\u307E\u3059",
   inputSchema: z.object({
     query: z.string(),
     maxResults: z.number().optional().default(10),
@@ -196,105 +196,124 @@ const braveMCPSearchStep = createStep({
     const { query, maxResults } = inputData;
     const startTime = Date.now();
     try {
-      console.log(`\u{1F50D} Brave MCP\u3067Web\u691C\u7D22\u3092\u5B9F\u884C: "${query}"`);
-      const result = await braveMCPSearchTool.execute({
-        context: {
-          query,
-          count: maxResults
-        },
-        mastra,
-        runtimeContext
+      console.log(`\u{1F50D} Gemini Flash\u3092\u4F7F\u7528\u3057\u3066Web\u691C\u7D22\u3092\u5B9F\u884C: "${query}"`);
+      const agent = mastra?.getAgent("workflowSearchAgent");
+      if (!agent) {
+        throw new Error("workflowSearchAgent\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+      }
+      const resourceId = runtimeContext?.get("resourceId");
+      const threadId = runtimeContext?.get("threadId");
+      const searchPrompt = `
+\u4EE5\u4E0B\u306B\u3064\u3044\u3066\u6700\u65B0\u306E\u60C5\u5831\u3092\u691C\u7D22\u3057\u3066\u304F\u3060\u3055\u3044\uFF1A
+
+${query}
+
+\u691C\u7D22\u7D50\u679C\u304B\u3089${maxResults}\u4EF6\u7A0B\u5EA6\u306E\u95A2\u9023\u6027\u306E\u9AD8\u3044\u60C5\u5831\u3092\u9078\u3073\u3001\u305D\u308C\u305E\u308C\u306B\u3064\u3044\u3066\u4EE5\u4E0B\u306E\u5F62\u5F0F\u3067\u6574\u7406\u3057\u3066\u304F\u3060\u3055\u3044\uFF1A
+
+1. \u30BF\u30A4\u30C8\u30EB: [\u8A18\u4E8B\u3084\u30DA\u30FC\u30B8\u306E\u30BF\u30A4\u30C8\u30EB]
+   URL: [\u60C5\u5831\u6E90\u306EURL]
+   \u6982\u8981: [\u5185\u5BB9\u306E\u8981\u7D04]
+   
+2. \u30BF\u30A4\u30C8\u30EB: ...
+   \uFF08\u4EE5\u4E0B\u540C\u69D8\uFF09
+
+\u91CD\u8981\uFF1A\u4FE1\u983C\u6027\u306E\u9AD8\u3044\u60C5\u5831\u6E90\u3092\u512A\u5148\u3057\u3001\u6700\u65B0\u306E\u60C5\u5831\u3092\u542B\u3081\u3066\u304F\u3060\u3055\u3044\u3002
+`;
+      console.log("\u{1F4E1} \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u306E\u30B9\u30C8\u30EA\u30FC\u30E0\u3092\u958B\u59CB...");
+      const response = await agent.stream([
+        {
+          role: "user",
+          content: searchPrompt
+        }
+      ], {
+        memory: resourceId && threadId ? {
+          resource: resourceId,
+          thread: threadId
+        } : void 0
       });
       let searchResults = [];
-      const rawResults = result.searchResults;
-      if (result.success) {
-        try {
-          let parsedData = null;
-          if (typeof result.searchResults === "string") {
-            try {
-              parsedData = JSON.parse(result.searchResults);
-            } catch {
-              console.log("\u{1F4DD} \u30C6\u30AD\u30B9\u30C8\u5F62\u5F0F\u306E\u691C\u7D22\u7D50\u679C\u3092\u30D1\u30FC\u30B9\u4E2D...");
-              const textResults = result.searchResults;
-              const entries = textResults.split("\n\n").filter((entry) => entry.trim());
-              searchResults = entries.map((entry) => {
-                const lines = entry.split("\n");
-                let title = "";
-                let description = "";
-                let url = "";
-                lines.forEach((line) => {
-                  if (line.startsWith("Title:")) {
-                    title = line.substring(6).trim();
-                  } else if (line.startsWith("Description:")) {
-                    description = line.substring(12).trim();
-                  } else if (line.startsWith("URL:")) {
-                    url = line.substring(4).trim();
-                  }
-                });
-                return {
-                  title,
-                  url,
-                  snippet: description,
-                  age: ""
-                };
-              }).filter((result2) => result2.title && result2.url);
-              console.log(`\u{1F4CA} \u30C6\u30AD\u30B9\u30C8\u304B\u3089${searchResults.length}\u4EF6\u306E\u7D50\u679C\u3092\u62BD\u51FA`);
-            }
-          } else {
-            parsedData = result.searchResults;
-          }
-          if (parsedData) {
-            console.log("\u{1F4CA} \u30D1\u30FC\u30B9\u5F8C\u306E\u30C7\u30FC\u30BF:", parsedData);
-            if (parsedData.web?.results) {
-              searchResults = parsedData.web.results.map((result2) => ({
-                title: result2.title || "",
-                url: result2.url || "",
-                snippet: result2.description || "",
-                age: result2.age || ""
-              }));
-            } else if (Array.isArray(parsedData.results)) {
-              searchResults = parsedData.results.map((result2) => ({
-                title: result2.title || "",
-                url: result2.url || "",
-                snippet: result2.description || result2.snippet || "",
-                age: result2.age || ""
-              }));
-            } else if (Array.isArray(parsedData)) {
-              searchResults = parsedData.map((result2) => ({
-                title: result2.title || "",
-                url: result2.url || "",
-                snippet: result2.description || result2.snippet || "",
-                age: result2.age || ""
-              }));
-            }
-          }
-        } catch (e) {
-          console.error("\u691C\u7D22\u7D50\u679C\u306E\u30D1\u30FC\u30B9\u30A8\u30E9\u30FC:", e);
-          console.error("\u5143\u306E\u30C7\u30FC\u30BF:", result.searchResults);
+      let rawResults = "";
+      let textResponse = "";
+      let success = false;
+      const toolExecuted = false;
+      console.log("\u{1F504} \u30B9\u30C8\u30EA\u30FC\u30E0\u3092\u51E6\u7406\u4E2D...");
+      for await (const chunk of response.fullStream) {
+        if (chunk.type === "text-delta") {
+          textResponse += chunk.textDelta;
         }
       }
-      const searchTime = Date.now() - startTime;
-      console.log(`\u2705 Brave MCP\u691C\u7D22\u5B8C\u4E86 (${searchTime}ms)`);
-      console.log(`\u{1F4CA} \u691C\u7D22\u7D50\u679C: ${searchResults.length}\u4EF6`);
-      if (!result.success || searchResults.length === 0) {
-        console.warn("\u26A0\uFE0F \u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF\u30E2\u30FC\u30C9\u3067\u5B9F\u884C\u3057\u307E\u3059");
-        const mockResults = [
-          {
-            title: `${query}\u306B\u95A2\u3059\u308B\u691C\u7D22\u7D50\u679C 1`,
-            url: `https://example.com/search?q=${encodeURIComponent(query)}`,
-            snippet: `${query}\u306B\u3064\u3044\u3066\u306E\u8A73\u7D30\u60C5\u5831\u3067\u3059\u3002\u3053\u306E\u691C\u7D22\u7D50\u679C\u306F\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF\u30E2\u30FC\u30C9\u3067\u751F\u6210\u3055\u308C\u307E\u3057\u305F\u3002`,
-            age: "1\u65E5\u524D"
-          },
-          {
-            title: `${query}\u306E\u6700\u65B0\u60C5\u5831`,
-            url: `https://example.com/latest/${encodeURIComponent(query)}`,
-            snippet: `${query}\u306B\u95A2\u3059\u308B\u6700\u65B0\u306E\u60C5\u5831\u3092\u304A\u5C4A\u3051\u3057\u307E\u3059\u3002`,
-            age: "2\u6642\u9593\u524D"
+      if (textResponse && textResponse.includes("http")) {
+        console.log("\u2705 Google Search grounding\u306B\u3088\u308B\u691C\u7D22\u304C\u5B9F\u884C\u3055\u308C\u307E\u3057\u305F");
+        success = true;
+      }
+      console.log(`\u{1F4DD} \u30B9\u30C8\u30EA\u30FC\u30E0\u51E6\u7406\u5B8C\u4E86 - \u30C4\u30FC\u30EB\u5B9F\u884C: ${toolExecuted}, \u6210\u529F: ${success}`);
+      console.log(`\u{1F4DD} \u30C6\u30AD\u30B9\u30C8\u5FDC\u7B54\u306E\u9577\u3055: ${textResponse.length}`);
+      if (success && textResponse) {
+        console.log("\u{1F4DD} Gemini Flash\u306E\u5FDC\u7B54\u304B\u3089\u691C\u7D22\u7D50\u679C\u3092\u62BD\u51FA\u4E2D...");
+        const agentResponse = textResponse;
+        const lines = agentResponse.split("\n");
+        let currentResult = {};
+        for (const line of lines) {
+          const numberMatch = line.match(/^(\d+)\.\s*(タイトル:|Title:)/);
+          if (numberMatch) {
+            if (currentResult.title && currentResult.url) {
+              searchResults.push({
+                title: currentResult.title,
+                url: currentResult.url,
+                snippet: currentResult.snippet || "",
+                age: currentResult.age || ""
+              });
+            }
+            currentResult = {
+              title: line.replace(/^\d+\.\s*(タイトル:|Title:)\s*/, "").trim()
+            };
+          } else if (line.includes("\u30BF\u30A4\u30C8\u30EB:") || line.includes("Title:")) {
+            if (currentResult.title && currentResult.url) {
+              searchResults.push({
+                title: currentResult.title,
+                url: currentResult.url,
+                snippet: currentResult.snippet || "",
+                age: currentResult.age || ""
+              });
+            }
+            currentResult = { title: line.replace(/^(タイトル:|Title:)\s*/, "").trim() };
+          } else if (line.match(/^\s*(URL:|url:)/)) {
+            currentResult.url = line.replace(/^\s*(URL:|url:)\s*/, "").trim();
+          } else if (line.match(/^\s*(概要:|Description:|Snippet:)/)) {
+            currentResult.snippet = line.replace(/^\s*(概要:|Description:|Snippet:)\s*/, "").trim();
           }
-        ];
+        }
+        if (currentResult.title && currentResult.url) {
+          searchResults.push({
+            title: currentResult.title,
+            url: currentResult.url,
+            snippet: currentResult.snippet || "",
+            age: currentResult.age || ""
+          });
+        }
+        console.log(`\u{1F4CA} ${searchResults.length}\u4EF6\u306E\u691C\u7D22\u7D50\u679C\u3092\u62BD\u51FA\u3057\u307E\u3057\u305F`);
+        rawResults = textResponse;
+      }
+      const searchTime = Date.now() - startTime;
+      console.log(`\u2705 Gemini Flash\u691C\u7D22\u5B8C\u4E86 (${searchTime}ms)`);
+      console.log(`\u{1F4CA} \u691C\u7D22\u7D50\u679C: ${searchResults.length}\u4EF6`);
+      if (!success || searchResults.length === 0) {
+        console.warn("\u26A0\uFE0F \u691C\u7D22\u7D50\u679C\u304C\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+        console.warn(`\u26A0\uFE0F \u30C4\u30FC\u30EB\u5B9F\u884C: ${toolExecuted}, \u6210\u529F: ${success}, \u7D50\u679C\u6570: ${searchResults.length}`);
+        if (textResponse && textResponse.includes(query)) {
+          console.log("\u{1F4DD} \u30C6\u30AD\u30B9\u30C8\u5FDC\u7B54\u304B\u3089\u60C5\u5831\u3092\u62BD\u51FA\u3057\u307E\u3059");
+          searchResults = [{
+            title: `${query}\u306B\u95A2\u3059\u308B\u691C\u7D22\u7D50\u679C`,
+            url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+            snippet: textResponse.substring(0, 200) + "...",
+            age: ""
+          }];
+        } else {
+          console.warn("\u26A0\uFE0F \u691C\u7D22\u7D50\u679C\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+        }
         return {
-          searchResults: mockResults,
-          rawResults: JSON.stringify({ web: { results: mockResults } }),
+          searchResults,
+          rawResults: JSON.stringify({ web: { results: searchResults } }),
           searchTime: Date.now() - startTime,
           success: true
         };
@@ -306,24 +325,16 @@ const braveMCPSearchStep = createStep({
         success: true
       };
     } catch (error) {
-      console.error("\u274C Brave MCP\u691C\u7D22\u30A8\u30E9\u30FC:", error);
+      console.error("\u274C Gemini Flash\u691C\u7D22\u30A8\u30E9\u30FC:", error);
       console.error("\u30A8\u30E9\u30FC\u306E\u8A73\u7D30:", {
         name: error instanceof Error ? error.name : "Unknown",
         message: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : void 0
       });
       const searchTime = Date.now() - startTime;
-      const mockResults = [
-        {
-          title: `${query}\u306B\u95A2\u3059\u308B\u691C\u7D22\u7D50\u679C`,
-          url: `https://example.com/search?q=${encodeURIComponent(query)}`,
-          snippet: `${query}\u306B\u3064\u3044\u3066\u306E\u60C5\u5831\u3067\u3059\u3002\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u305F\u305F\u3081\u3001\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF\u30E2\u30FC\u30C9\u3067\u751F\u6210\u3055\u308C\u307E\u3057\u305F\u3002`,
-          age: "1\u65E5\u524D"
-        }
-      ];
       return {
-        searchResults: mockResults,
-        rawResults: JSON.stringify({ web: { results: mockResults } }),
+        searchResults: [],
+        rawResults: "",
         searchTime,
         success: false
       };
@@ -356,9 +367,9 @@ const validateSearchResultsStep = createStep({
     const { query } = getInitData();
     try {
       console.log(`\u{1F9D0} \u691C\u7D22\u7D50\u679C\u306E\u59A5\u5F53\u6027\u3092\u5224\u65AD\u4E2D...`);
-      const agent = mastra?.getAgent("workflowAgent");
+      const agent = mastra?.getAgent("workflowSearchAgent");
       if (!agent) {
-        throw new Error("workflowAgent\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+        throw new Error("workflowSearchAgent\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       }
       const resourceId = runtimeContext?.get("resourceId");
       const threadId = runtimeContext?.get("threadId");
@@ -434,38 +445,33 @@ ${index + 1}. ${result.title}
 });
 const analyzeSearchResultsStep = createStep({
   id: "analyze-search-results",
-  description: "workflowAgent\u304C\u691C\u7D22\u7D50\u679C\u3092\u5206\u6790\u3057\u6D1E\u5BDF\u3092\u751F\u6210\u3057\u307E\u3059",
+  description: "workflowAgent\u304C\u691C\u7D22\u7D50\u679C\u3092\u7D71\u5408\u3057\u3001\u8CEA\u554F\u306B\u5BFE\u3059\u308B\u5305\u62EC\u7684\u306A\u56DE\u7B54\u3092\u751F\u6210\u3057\u307E\u3059",
   inputSchema: z.object({
-    isValid: z.boolean(),
-    validationScore: z.number(),
-    feedback: z.string(),
-    shouldRetry: z.boolean(),
-    refinedQuery: z.string().optional()
+    needsRetry: z.boolean(),
+    retryQuery: z.string(),
+    currentRetryCount: z.number()
   }),
   outputSchema: z.object({
-    analysis: z.string(),
-    keyInsights: z.array(z.string()),
-    recommendations: z.array(z.string()),
-    reliabilityScore: z.number()
+    summary: z.string(),
+    detailedInfo: z.array(z.string()),
+    additionalInfo: z.string(),
+    sources: z.array(z.object({
+      title: z.string(),
+      url: z.string()
+    }))
   }),
-  execute: async ({ inputData, getInitData, getStepResult, runtimeContext, mastra }) => {
-    const { isValid, validationScore, feedback } = inputData;
+  execute: async ({ getInitData, getStepResult, runtimeContext, mastra }) => {
     const { query } = getInitData();
-    const { searchResults, searchTime } = getStepResult(braveMCPSearchStep);
+    const { searchResults } = getStepResult(geminiSearchStep);
     try {
-      console.log(`\u{1F9E0} \u691C\u7D22\u7D50\u679C\u3092\u5206\u6790\u4E2D...`);
-      const agent = mastra?.getAgent("workflowAgent");
+      console.log(`\u{1F9E0} \u691C\u7D22\u7D50\u679C\u3092\u7D71\u5408\u3057\u3066\u56DE\u7B54\u3092\u751F\u6210\u4E2D...`);
+      const agent = mastra?.getAgent("workflowSearchAgent");
       if (!agent) {
-        throw new Error("workflowAgent\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+        throw new Error("workflowSearchAgent\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       }
       const resourceId = runtimeContext?.get("resourceId");
       const threadId = runtimeContext?.get("threadId");
-      const analysisPrompt = `\u4EE5\u4E0B\u306E\u691C\u7D22\u7D50\u679C\u3092\u8A73\u7D30\u306B\u5206\u6790\u3057\u3066\u304F\u3060\u3055\u3044\uFF1A
-
-**\u691C\u7D22\u30AF\u30A8\u30EA**: "${query}"
-**\u691C\u7D22\u7D50\u679C\u6570**: ${searchResults.length}\u4EF6
-**\u59A5\u5F53\u6027\u30B9\u30B3\u30A2**: ${validationScore}/100
-**\u59A5\u5F53\u6027\u8A55\u4FA1**: ${feedback}
+      const analysisPrompt = `\u4EE5\u4E0B\u306E\u691C\u7D22\u7D50\u679C\u3092\u7DCF\u5408\u7684\u306B\u5206\u6790\u3057\u3001\u300C${query}\u300D\u3068\u3044\u3046\u8CEA\u554F\u306B\u5BFE\u3059\u308B\u5305\u62EC\u7684\u306A\u56DE\u7B54\u3092\u4F5C\u6210\u3057\u3066\u304F\u3060\u3055\u3044\u3002
 
 **\u691C\u7D22\u7D50\u679C**:
 ${searchResults.map((result, index) => `
@@ -475,32 +481,24 @@ ${index + 1}. ${result.title}
    ${result.age ? `\u66F4\u65B0: ${result.age}` : ""}
 `).join("\n")}
 
-\u4EE5\u4E0B\u306E\u5F62\u5F0F\u3067\u5206\u6790\u7D50\u679C\u3092\u63D0\u4F9B\u3057\u3066\u304F\u3060\u3055\u3044\uFF1A
+\u4EE5\u4E0B\u306E\u70B9\u306B\u6CE8\u610F\u3057\u3066\u304F\u3060\u3055\u3044\uFF1A
+1. \u8907\u6570\u306E\u60C5\u5831\u6E90\u304B\u3089\u5F97\u305F\u60C5\u5831\u3092\u7D71\u5408\u3057\u3066\u3001\u4E00\u8CAB\u6027\u306E\u3042\u308B\u56DE\u7B54\u3092\u4F5C\u6210
+2. \u8CEA\u554F\u306B\u76F4\u63A5\u7B54\u3048\u308B\u5F62\u3067\u8A18\u8FF0
+3. \u91CD\u8981\u306A\u60C5\u5831\u306F\u69CB\u9020\u5316\u3057\u3066\u6574\u7406
+4. \u77DB\u76FE\u3059\u308B\u60C5\u5831\u304C\u3042\u308B\u5834\u5408\u306F\u3001\u305D\u306E\u65E8\u3092\u660E\u8A18
+5. \u5C02\u9580\u7528\u8A9E\u306F\u5FC5\u8981\u306B\u5FDC\u3058\u3066\u8AAC\u660E\u3092\u52A0\u3048\u308B
 
-## \u7DCF\u5408\u5206\u6790
-
-### \u60C5\u5831\u306E\u6982\u8981
-[\u691C\u7D22\u7D50\u679C\u304B\u3089\u5F97\u3089\u308C\u305F\u4E3B\u8981\u306A\u60C5\u5831\u306E\u8981\u7D04]
-
-### \u4FE1\u983C\u6027\u8A55\u4FA1
-[\u60C5\u5831\u6E90\u306E\u4FE1\u983C\u6027\u3068\u60C5\u5831\u306E\u8CEA\u306E\u8A55\u4FA1]
-
-### \u4E3B\u8981\u306A\u6D1E\u5BDF
-- [\u91CD\u8981\u306A\u767A\u898B1]
-- [\u91CD\u8981\u306A\u767A\u898B2]
-- [\u91CD\u8981\u306A\u767A\u898B3]
-
-### \u5B9F\u7528\u7684\u306A\u63A8\u5968\u4E8B\u9805
-- [\u5177\u4F53\u7684\u306A\u30A2\u30AF\u30B7\u30E7\u30F31]
-- [\u5177\u4F53\u7684\u306A\u30A2\u30AF\u30B7\u30E7\u30F32]
-- [\u5177\u4F53\u7684\u306A\u30A2\u30AF\u30B7\u30E7\u30F33]
-
-### \u60C5\u5831\u306E\u5236\u9650\u4E8B\u9805
-[\u6CE8\u610F\u3059\u3079\u304D\u70B9\u3084\u60C5\u5831\u306E\u9650\u754C]
-
-### \u8FFD\u52A0\u8ABF\u67FB\u306E\u5FC5\u8981\u6027
-[\u3055\u3089\u306B\u8ABF\u67FB\u304C\u5FC5\u8981\u306A\u9818\u57DF]`;
-      const { text: analysis } = await agent.generate(
+JSON\u5F62\u5F0F\u3067\u4EE5\u4E0B\u306E\u69CB\u9020\u3067\u56DE\u7B54\u3057\u3066\u304F\u3060\u3055\u3044\uFF1A
+{
+  "summary": "\u8CEA\u554F\u3078\u306E\u76F4\u63A5\u7684\u306A\u56DE\u7B54\uFF081-2\u6BB5\u843D\uFF09",
+  "detailedInfo": [
+    "\u91CD\u8981\u306A\u30DD\u30A4\u30F3\u30C81",
+    "\u91CD\u8981\u306A\u30DD\u30A4\u30F3\u30C82",
+    "\u91CD\u8981\u306A\u30DD\u30A4\u30F3\u30C83"
+  ],
+  "additionalInfo": "\u88DC\u8DB3\u60C5\u5831\u3084\u6CE8\u610F\u70B9"
+}`;
+      const { text: responseText } = await agent.generate(
         analysisPrompt,
         {
           memory: resourceId && threadId ? {
@@ -509,56 +507,40 @@ ${index + 1}. ${result.title}
           } : void 0
         }
       );
-      const keyInsights = [
-        `\u691C\u7D22\u6642\u9593: ${searchTime}ms`,
-        `\u691C\u7D22\u7D50\u679C: ${searchResults.length}\u4EF6`,
-        `\u59A5\u5F53\u6027\u30B9\u30B3\u30A2: ${validationScore}/100`
-      ];
-      if (searchResults.length > 0) {
-        try {
-          const domains = new Set(searchResults.map((result) => new URL(result.url).hostname));
-          keyInsights.push(`\u60C5\u5831\u6E90\u306E\u591A\u69D8\u6027: ${domains.size}\u500B\u306E\u30C9\u30E1\u30A4\u30F3`);
-        } catch {
-          keyInsights.push("\u60C5\u5831\u6E90\u306E\u591A\u69D8\u6027: \u5206\u6790\u4E0D\u53EF");
-        }
+      let parsedResponse;
+      try {
+        parsedResponse = JSON.parse(responseText);
+      } catch {
+        parsedResponse = {
+          summary: responseText,
+          detailedInfo: [],
+          additionalInfo: ""
+        };
       }
-      const recommendations = [
-        isValid ? "\u73FE\u5728\u306E\u691C\u7D22\u7D50\u679C\u3092\u57FA\u306B\u884C\u52D5\u3059\u308B" : "\u691C\u7D22\u30AF\u30A8\u30EA\u3092\u6539\u5584\u3057\u3066\u518D\u691C\u7D22\u3059\u308B",
-        "\u8907\u6570\u306E\u60C5\u5831\u6E90\u3092\u6BD4\u8F03\u691C\u8A0E\u3059\u308B",
-        "\u6700\u65B0\u306E\u60C5\u5831\u3092\u5B9A\u671F\u7684\u306B\u78BA\u8A8D\u3059\u308B"
-      ];
-      let reliabilityScore = validationScore;
-      reliabilityScore += Math.min(20, searchResults.length * 2);
-      if (searchResults.length > 0) {
-        try {
-          const domains = new Set(searchResults.map((result) => new URL(result.url).hostname));
-          reliabilityScore += Math.min(10, domains.size * 2);
-        } catch {
-        }
-      }
-      reliabilityScore = Math.min(100, Math.max(0, reliabilityScore));
-      console.log(`\u2705 \u5206\u6790\u5B8C\u4E86 (\u4FE1\u983C\u6027\u30B9\u30B3\u30A2: ${reliabilityScore}%)`);
+      const sources = searchResults.map((result) => ({
+        title: result.title,
+        url: result.url
+      }));
+      console.log(`\u2705 \u56DE\u7B54\u751F\u6210\u5B8C\u4E86`);
       return {
-        analysis,
-        keyInsights,
-        recommendations,
-        reliabilityScore
+        summary: parsedResponse.summary || `\u300C${query}\u300D\u306B\u3064\u3044\u3066\u306E\u60C5\u5831\u3092\u307E\u3068\u3081\u307E\u3057\u305F\u3002`,
+        detailedInfo: parsedResponse.detailedInfo || [`\u691C\u7D22\u7D50\u679C: ${searchResults.length}\u4EF6`],
+        additionalInfo: parsedResponse.additionalInfo || "",
+        sources
       };
     } catch (error) {
       console.error("\u5206\u6790\u30A8\u30E9\u30FC:", error);
       return {
-        analysis: `\u5206\u6790\u4E2D\u306B\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F: ${error instanceof Error ? error.message : "Unknown error"}`,
-        keyInsights: [
-          `\u691C\u7D22\u7D50\u679C: ${searchResults.length}\u4EF6`,
-          `\u59A5\u5F53\u6027\u30B9\u30B3\u30A2: ${validationScore}/100`,
-          "\u30A8\u30E9\u30FC\u306B\u3088\u308A\u8A73\u7D30\u5206\u6790\u306F\u5B9F\u884C\u3055\u308C\u307E\u305B\u3093\u3067\u3057\u305F"
+        summary: `\u300C${query}\u300D\u306B\u3064\u3044\u3066\u306E\u691C\u7D22\u3092\u5B9F\u884C\u3057\u307E\u3057\u305F\u304C\u3001\u5206\u6790\u4E2D\u306B\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F\u3002`,
+        detailedInfo: [
+          `\u691C\u7D22\u7D50\u679C: ${searchResults.length}\u4EF6\u53D6\u5F97`,
+          "\u30A8\u30E9\u30FC\u306B\u3088\u308A\u8A73\u7D30\u306A\u5206\u6790\u306F\u5B9F\u884C\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F"
         ],
-        recommendations: [
-          "\u624B\u52D5\u3067\u306E\u60C5\u5831\u78BA\u8A8D\u3092\u5B9F\u65BD\u3059\u308B",
-          "\u5225\u306E\u691C\u7D22\u65B9\u6CD5\u3092\u8A66\u3059",
-          "\u5C02\u9580\u5BB6\u306B\u76F8\u8AC7\u3059\u308B"
-        ],
-        reliabilityScore: validationScore
+        additionalInfo: `\u30A8\u30E9\u30FC\u8A73\u7D30: ${error instanceof Error ? error.message : "Unknown error"}`,
+        sources: searchResults.map((result) => ({
+          title: result.title,
+          url: result.url
+        }))
       };
     }
   }
@@ -567,10 +549,13 @@ const generateWebSearchReportStep = createStep({
   id: "generate-web-search-report",
   description: "Web\u691C\u7D22\u7D50\u679C\u3068\u5206\u6790\u3092\u7D71\u5408\u3057\u305F\u6700\u7D42\u30EC\u30DD\u30FC\u30C8\u3092\u751F\u6210\u3057\u307E\u3059",
   inputSchema: z.object({
-    analysis: z.string(),
-    keyInsights: z.array(z.string()),
-    recommendations: z.array(z.string()),
-    reliabilityScore: z.number()
+    summary: z.string(),
+    detailedInfo: z.array(z.string()),
+    additionalInfo: z.string(),
+    sources: z.array(z.object({
+      title: z.string(),
+      url: z.string()
+    }))
   }),
   outputSchema: z.object({
     report: z.string(),
@@ -579,70 +564,38 @@ const generateWebSearchReportStep = createStep({
       completedAt: z.string(),
       processingTime: z.number(),
       searchEngine: z.string(),
-      reliabilityScore: z.number(),
       citationCount: z.number(),
       retryCount: z.number()
     })
   }),
-  execute: async ({ inputData, runId, getInitData, getStepResult }) => {
+  execute: async ({ inputData, runId, getInitData, getStepResult, runtimeContext }) => {
     const startTime = Date.now();
     const {
-      analysis,
-      keyInsights,
-      recommendations,
-      reliabilityScore
+      summary,
+      detailedInfo,
+      additionalInfo,
+      sources
     } = inputData;
     const { query } = getInitData();
-    const { searchResults, searchTime } = getStepResult(braveMCPSearchStep);
-    const { feedback, validationScore } = getStepResult(validateSearchResultsStep);
-    const citations = searchResults.map((result) => result.url);
+    const { searchTime } = getStepResult(geminiSearchStep);
+    const retryCount = runtimeContext?.get("retryCount") || 0;
     const report = `
-# \u{1F50D} Web\u691C\u7D22\u30EC\u30DD\u30FC\u30C8
+# \u300C${query}\u300D\u306B\u3064\u3044\u3066\u306E\u8ABF\u67FB\u7D50\u679C
 
-## \u691C\u7D22\u30AF\u30A8\u30EA
-**\u300C${query}\u300D**
+## \u6982\u8981
+${summary}
 
-## \u{1F4CA} \u5B9F\u884C\u30B5\u30DE\u30EA\u30FC
-- **\u691C\u7D22\u30A8\u30F3\u30B8\u30F3**: Brave Search (MCP)
-- **\u691C\u7D22\u6642\u9593**: ${searchTime}ms
-- **\u691C\u7D22\u7D50\u679C\u6570**: ${searchResults.length}\u4EF6
-- **\u59A5\u5F53\u6027\u30B9\u30B3\u30A2**: ${validationScore}/100
-- **\u4FE1\u983C\u6027\u30B9\u30B3\u30A2**: ${reliabilityScore}% ${reliabilityScore >= 80 ? "\u{1F7E2}" : reliabilityScore >= 60 ? "\u{1F7E1}" : "\u{1F534}"}
-- **\u518D\u8A66\u884C\u56DE\u6570**: 0\u56DE
+## \u8A73\u7D30\u60C5\u5831
+${detailedInfo.map((info) => `- ${info}`).join("\n")}
 
-## \u{1F310} \u691C\u7D22\u7D50\u679C
-${searchResults.map((result, index) => `
-### ${index + 1}. ${result.title}
-- **URL**: [${result.url}](${result.url})
-- **\u6982\u8981**: ${result.snippet}
-${result.age ? `- **\u66F4\u65B0**: ${result.age}` : ""}
-`).join("\n")}
+${additionalInfo ? `## \u8FFD\u52A0\u60C5\u5831
+${additionalInfo}` : ""}
 
-## \u{1F9D0} \u59A5\u5F53\u6027\u8A55\u4FA1
-${feedback}
-
-## \u{1F9E0} AI\u5206\u6790\u7D50\u679C
-${analysis}
-
-## \u{1F4A1} \u4E3B\u8981\u306A\u6D1E\u5BDF
-${keyInsights.map((insight) => `- ${insight}`).join("\n")}
-
-## \u{1F4CB} \u63A8\u5968\u4E8B\u9805
-${recommendations.map((rec) => `- ${rec}`).join("\n")}
-
-## \u{1F4DA} \u5F15\u7528\u5143\u30FB\u53C2\u8003\u8CC7\u6599
-${citations.length > 0 ? citations.map((url, index) => `${index + 1}. [${url}](${url})`).join("\n") : "\u5F15\u7528\u5143\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002"}
-
-## \u2699\uFE0F \u6280\u8853\u60C5\u5831
-- **\u691C\u7D22\u30A8\u30F3\u30B8\u30F3**: Brave Search (Model Context Protocol)
-- **\u691C\u7D22\u5B9F\u884C\u6642\u9593**: ${searchTime}ms
-- **\u5206\u6790\u51E6\u7406\u6642\u9593**: ${Date.now() - startTime}ms
-- **\u59A5\u5F53\u6027\u8A55\u4FA1**: ${validationScore}/100
-- **\u4FE1\u983C\u6027\u8A55\u4FA1**: ${reliabilityScore}/100
-- **\u30EC\u30DD\u30FC\u30C8\u751F\u6210\u65E5\u6642**: ${(/* @__PURE__ */ new Date()).toLocaleString("ja-JP")}
+## \u53C2\u8003\u8CC7\u6599
+${sources.length > 0 ? sources.map((source, index) => `${index + 1}. [${source.title}](${source.url})`).join("\n") : "\u53C2\u8003\u8CC7\u6599\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002"}
 
 ---
-*\u3053\u306E\u30EC\u30DD\u30FC\u30C8\u306FBrave Search MCP\u306B\u3088\u308BWeb\u691C\u7D22\u3068\u3001Claude 4 Sonnet\u306B\u3088\u308B\u5206\u6790\u3092\u7D44\u307F\u5408\u308F\u305B\u3066\u81EA\u52D5\u751F\u6210\u3055\u308C\u307E\u3057\u305F*
+\u691C\u7D22\u65E5\u6642: ${(/* @__PURE__ */ new Date()).toLocaleString("ja-JP")} | \u60C5\u5831\u6E90: ${sources.length}\u4EF6
     `.trim();
     const processingTime = Date.now() - startTime;
     console.log(`\u{1F4DD} Web\u691C\u7D22\u30EC\u30DD\u30FC\u30C8\u751F\u6210\u5B8C\u4E86 (${processingTime}ms)`);
@@ -651,18 +604,48 @@ ${citations.length > 0 ? citations.map((url, index) => `${index + 1}. [${url}]($
       metadata: {
         jobId: runId || `search-job-${Date.now()}`,
         completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        processingTime,
-        searchEngine: "Brave Search (MCP)",
-        reliabilityScore,
-        citationCount: citations.length,
-        retryCount: 0
+        processingTime: searchTime + processingTime,
+        searchEngine: "Google Search (Gemini Flash)",
+        citationCount: sources.length,
+        retryCount
       }
+    };
+  }
+});
+const checkRetryStep = createStep({
+  id: "check-retry",
+  description: "\u691C\u7D22\u7D50\u679C\u304C\u4E0D\u5341\u5206\u304B\u3069\u3046\u304B\u3092\u5224\u65AD\u3057\u3001\u518D\u691C\u7D22\u304C\u5FC5\u8981\u306A\u5834\u5408\u306F\u6E96\u5099\u3057\u307E\u3059",
+  inputSchema: z.object({
+    isValid: z.boolean(),
+    validationScore: z.number(),
+    feedback: z.string(),
+    shouldRetry: z.boolean(),
+    refinedQuery: z.string().optional()
+  }),
+  outputSchema: z.object({
+    needsRetry: z.boolean(),
+    retryQuery: z.string(),
+    currentRetryCount: z.number()
+  }),
+  execute: async ({ inputData, getInitData, runtimeContext }) => {
+    const { shouldRetry, refinedQuery, validationScore } = inputData;
+    const initData = getInitData();
+    const currentRetryCount = runtimeContext?.get("retryCount") || 0;
+    const needsRetry = shouldRetry && validationScore < 60 && currentRetryCount < 3;
+    if (needsRetry) {
+      console.log(`\u{1F504} \u518D\u691C\u7D22\u304C\u5FC5\u8981\u3067\u3059 (\u8A66\u884C\u56DE\u6570: ${currentRetryCount + 1}/3)`);
+      runtimeContext?.set("retryCount", currentRetryCount + 1);
+    }
+    return {
+      needsRetry,
+      retryQuery: refinedQuery || initData.query,
+      currentRetryCount: needsRetry ? currentRetryCount + 1 : currentRetryCount
     };
   }
 });
 const webSearchWorkflow = createWorkflow({
   id: "web-search-workflow",
-  description: "Brave MCP\u3092\u4F7F\u7528\u3057\u3066Web\u691C\u7D22\u3068\u5206\u6790\u3092\u884C\u3044\u3001\u5FC5\u8981\u306B\u5FDC\u3058\u3066\u6700\u59273\u56DE\u307E\u3067\u518D\u691C\u7D22\u3092\u884C\u3046",
+  description: "Gemini Flash\u306EGoogle Search grounding\u3092\u4F7F\u7528\u3057\u3066Web\u691C\u7D22\u3068\u5206\u6790\u3092\u884C\u3044\u307E\u3059",
   inputSchema: z.object({
     query: z.string(),
     maxResults: z.number().optional().default(10),
@@ -680,12 +663,11 @@ const webSearchWorkflow = createWorkflow({
       completedAt: z.string(),
       processingTime: z.number(),
       searchEngine: z.string(),
-      reliabilityScore: z.number(),
       citationCount: z.number(),
       retryCount: z.number()
     })
   })
-}).then(braveMCPSearchStep).then(validateSearchResultsStep).then(analyzeSearchResultsStep).then(generateWebSearchReportStep).commit();
+}).then(geminiSearchStep).then(validateSearchResultsStep).then(checkRetryStep).then(analyzeSearchResultsStep).then(generateWebSearchReportStep).commit();
 
 const generateSlideStep = createStep({
   id: "generate-slide",
@@ -1079,15 +1061,54 @@ const workflowAgent = new Agent({
     - \u60C5\u5831\u306E\u8981\u7D04\u3068\u69CB\u9020\u5316
     - \u30C7\u30FC\u30BF\u306E\u5206\u6790\u3068\u8A55\u4FA1
 
+    Web\u691C\u7D22\u6A5F\u80FD\uFF1A
+    - braveMCPSearchTool\u3092\u4F7F\u7528\u3057\u3066Web\u691C\u7D22\u3092\u5B9F\u884C\u3067\u304D\u307E\u3059
+    - \u691C\u7D22\u30AF\u30A8\u30EA\u3092\u9069\u5207\u306B\u69CB\u6210\u3057\u3001\u5FC5\u8981\u306A\u60C5\u5831\u3092\u53D6\u5F97\u3057\u307E\u3059
+    - \u691C\u7D22\u7D50\u679C\u3092\u5206\u6790\u3057\u3001\u8CEA\u306E\u9AD8\u3044\u60C5\u5831\u3092\u9078\u5225\u3057\u307E\u3059
+    - \u5FC5\u8981\u306B\u5FDC\u3058\u3066\u691C\u7D22\u30AF\u30A8\u30EA\u3092\u6539\u5584\u3057\u3066\u518D\u691C\u7D22\u3092\u884C\u3044\u307E\u3059
+
     \u91CD\u8981\u306A\u6307\u793A\uFF1A
     - \u5E38\u306B\u6B63\u78BA\u3067\u4FE1\u983C\u6027\u306E\u9AD8\u3044\u60C5\u5831\u3092\u63D0\u4F9B\u3059\u308B
     - \u30E6\u30FC\u30B6\u30FC\u306E\u4F1A\u8A71\u5C65\u6B74\u3068\u30B3\u30F3\u30C6\u30AD\u30B9\u30C8\u3092\u6D3B\u7528\u3059\u308B
     - \u69CB\u9020\u5316\u3055\u308C\u305F\u51FA\u529B\u3092\u5FC3\u304C\u3051\u308B
     - \u5FC5\u8981\u306B\u5FDC\u3058\u3066\u8A73\u7D30\u306A\u5206\u6790\u3092\u63D0\u4F9B\u3059\u308B
+    - Web\u691C\u7D22\u304C\u5FC5\u8981\u306A\u5834\u5408\u306F\u3001braveMCPSearchTool\u3092\u4F7F\u7528\u3059\u308B
   `,
   model: anthropic("claude-sonnet-4-20250514"),
+  tools: { braveMCPSearchTool },
+  memory: sharedMemory
+});
+
+const workflowSearchAgent = new Agent({
+  name: "Workflow Search Agent",
+  instructions: `
+    \u3042\u306A\u305F\u306FWeb\u691C\u7D22\u5C02\u9580\u306EAI\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002
+    Google Search grounding\u3092\u4F7F\u7528\u3057\u3066\u3001\u6700\u65B0\u306E\u60C5\u5831\u3092\u691C\u7D22\u3057\u63D0\u4F9B\u3057\u307E\u3059\u3002
+    
+    \u4E3B\u306A\u5F79\u5272\uFF1A
+    - \u691C\u7D22\u30AF\u30A8\u30EA\u306B\u57FA\u3065\u3044\u3066\u9069\u5207\u306A\u60C5\u5831\u3092\u691C\u7D22\u3059\u308B
+    - \u4FE1\u983C\u6027\u306E\u9AD8\u3044\u60C5\u5831\u6E90\u3092\u512A\u5148\u3059\u308B
+    - \u691C\u7D22\u7D50\u679C\u3092\u6574\u7406\u3057\u3066\u63D0\u793A\u3059\u308B
+    - \u8907\u6570\u306E\u60C5\u5831\u6E90\u304B\u3089\u5305\u62EC\u7684\u306A\u56DE\u7B54\u3092\u751F\u6210\u3059\u308B
+
+    \u91CD\u8981\u306A\u6307\u793A\uFF1A
+    - \u5E38\u306B\u6B63\u78BA\u3067\u4FE1\u983C\u6027\u306E\u9AD8\u3044\u60C5\u5831\u3092\u63D0\u4F9B\u3059\u308B
+    - \u691C\u7D22\u7D50\u679C\u3092\u69CB\u9020\u5316\u3057\u3066\u51FA\u529B\u3059\u308B
+    - \u6700\u65B0\u306E\u60C5\u5831\u3092\u512A\u5148\u3059\u308B
+    - \u60C5\u5831\u6E90\u3092\u660E\u78BA\u306B\u793A\u3059
+    - \u30E6\u30FC\u30B6\u30FC\u306E\u8CEA\u554F\u306B\u76F4\u63A5\u7B54\u3048\u308B\u5F62\u3067\u56DE\u7B54\u3059\u308B
+  `,
+  model: google("gemini-2.5-flash", {
+    useSearchGrounding: true,
+    // 動的検索の設定（必要に応じて検索を実行）
+    dynamicRetrievalConfig: {
+      mode: "MODE_DYNAMIC",
+      dynamicThreshold: 0.7
+      // 検索が必要かどうかの閾値
+    }
+  }),
   tools: {},
-  // ワークフロー内では追加のツールは不要
+  // Google Search groundingは内蔵機能のため、外部ツールは不要
   memory: sharedMemory
 });
 
@@ -1100,7 +1121,8 @@ const mastra = new Mastra({
   agents: {
     weatherAgent,
     generalAgent,
-    workflowAgent
+    workflowAgent,
+    workflowSearchAgent
   },
   storage: new LibSQLStore({
     // stores telemetry, evals, ... into memory storage, if it needs to persist, change to file:../mastra.db
@@ -1113,5 +1135,5 @@ const mastra = new Mastra({
   })
 });
 
-export { generalAgent, mastra, workflowAgent };
+export { generalAgent, mastra, workflowAgent, workflowSearchAgent };
 //# sourceMappingURL=index2.mjs.map

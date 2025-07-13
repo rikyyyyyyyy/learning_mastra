@@ -8,6 +8,7 @@ import { slideGenerationWorkflow } from './workflows/slide-generation-workflow';
 import { weatherAgent } from './agents/weather-agent';
 import { generalAgent } from './agents/general-agent';
 import { workflowAgent } from './agents/workflow-agent';
+import { workflowSearchAgent } from './agents/workflow-search-agent';
 
 export const mastra = new Mastra({
   workflows: { 
@@ -19,6 +20,7 @@ export const mastra = new Mastra({
     weatherAgent, 
     generalAgent,
     workflowAgent,
+    workflowSearchAgent,
   },
   storage: new LibSQLStore({
     // stores telemetry, evals, ... into memory storage, if it needs to persist, change to file:../mastra.db
@@ -31,4 +33,4 @@ export const mastra = new Mastra({
 });
 
 // エージェントをエクスポート
-export { generalAgent, workflowAgent };
+export { generalAgent, workflowAgent, workflowSearchAgent };
