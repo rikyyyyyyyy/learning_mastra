@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent';
 import { openai } from '@ai-sdk/openai';
 import { sharedMemory } from '../../shared-memory';
-import { braveMCPSearchTool } from '../../tools/brave-search-wrapper';
+import { exaMCPSearchTool } from '../../tools/exa-search-wrapper';
 import { weatherTool } from '../../tools/legacy/weather-tool';
 
 export const workerAgent = new Agent({
@@ -16,7 +16,7 @@ Your primary responsibilities:
 5. **Efficiency**: Complete tasks quickly and accurately
 
 Available Tools:
-- **braveMCPSearchTool**: For web searches and information gathering
+- **exaMCPSearchTool**: For advanced web searches and information gathering (supports web, research papers, GitHub, companies, LinkedIn, Wikipedia)
 - **weatherTool**: For weather information retrieval
 - Additional tools will be made available as needed
 
@@ -43,7 +43,7 @@ Output Format:
 Remember: You are the execution layer. Focus on getting things done efficiently and accurately according to the Manager's instructions.`,
   model: openai('gpt-4o'),
   tools: { 
-    braveMCPSearchTool,
+    exaMCPSearchTool,
     weatherTool,
     // Additional tools can be added here as the system grows
   },

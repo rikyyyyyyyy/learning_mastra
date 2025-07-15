@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { getBraveMCPClient } from '../mcp/brave-mcp-client';
+import { getExaMCPClient } from '../mcp/exa-mcp-client';
 
 // MCPツールを取得してキャッシュ
 interface MCPTool {
@@ -18,68 +18,111 @@ async function getMCPTools() {
     return mcpTools;
   }
   
-  console.log('🔧 MCPツールを初回取得中...');
-  const mcpClient = getBraveMCPClient();
+  console.log('🔧 Exa MCPツールを初回取得中...');
+  const mcpClient = getExaMCPClient();
   mcpTools = await mcpClient.getTools();
-  console.log('📦 取得したMCPツール:', Object.keys(mcpTools));
+  console.log('📦 取得したExa MCPツール:', Object.keys(mcpTools));
   
   return mcpTools;
 }
 
-// Brave MCPツールをMastraツールとしてラップ
-export const braveMCPSearchTool = createTool({
-  id: 'brave-mcp-search',
-  description: 'Brave MCPを使用してWeb検索を実行します',
+// Exa MCPツールをMastraツールとしてラップ
+export const exaMCPSearchTool = createTool({
+  id: 'exa-mcp-search',
+  description: 'Exa MCPを使用して高度なWeb検索を実行します',
   inputSchema: z.object({
-    query: z.string(),
-    count: z.number().optional().default(10),
+    query: z.string().describe('検索クエリ'),
+    numResults: z.number().optional().default(10).describe('取得する結果の数'),
+    searchType: z.enum(['web', 'research_paper', 'github', 'company', 'linkedin', 'wikipedia']).optional().default('web').describe('検索タイプ'),
   }),
   outputSchema: z.object({
     searchResults: z.string(),
     success: z.boolean(),
+    toolUsed: z.string().optional(),
   }),
   execute: async ({ context, mastra, runtimeContext }) => {
-    const { query, count } = context;
+    const { query, numResults, searchType } = context;
     
     try {
-      console.log(`🔍 Brave MCPツールでWeb検索を実行: "${query}"`);
+      console.log(`🔍 Exa MCPツールで${searchType}検索を実行: "${query}"`);
       
       // MCPツールを取得
       const tools = await getMCPTools();
       
-      // braveSearch_brave_web_search ツールを探す（MCPClient.getTools()はサーバー名でプレフィックスを付ける）
-      const braveSearchToolName = Object.keys(tools).find(name => 
-        name.includes('brave_web_search')
-      );
+      // 検索タイプに基づいてツールを選択
+      let targetToolName: string | undefined;
       
-      if (!braveSearchToolName) {
-        console.error('❌ Brave Web検索ツールが見つかりません');
+      switch (searchType) {
+        case 'web':
+          targetToolName = Object.keys(tools).find(name => 
+            name.includes('web_search_exa') && !name.includes('wikipedia')
+          );
+          break;
+        case 'research_paper':
+          targetToolName = Object.keys(tools).find(name => 
+            name.includes('research_paper_search')
+          );
+          break;
+        case 'github':
+          targetToolName = Object.keys(tools).find(name => 
+            name.includes('github_search')
+          );
+          break;
+        case 'company':
+          targetToolName = Object.keys(tools).find(name => 
+            name.includes('company_research')
+          );
+          break;
+        case 'linkedin':
+          targetToolName = Object.keys(tools).find(name => 
+            name.includes('linkedin_search')
+          );
+          break;
+        case 'wikipedia':
+          targetToolName = Object.keys(tools).find(name => 
+            name.includes('wikipedia_search_exa')
+          );
+          break;
+      }
+      
+      if (!targetToolName) {
+        console.error(`❌ Exa ${searchType}検索ツールが見つかりません`);
         console.error('利用可能なツール:', Object.keys(tools));
         return {
-          searchResults: JSON.stringify({ error: 'Brave Web検索ツールが見つかりません' }),
+          searchResults: JSON.stringify({ error: `Exa ${searchType}検索ツールが見つかりません` }),
           success: false,
         };
       }
       
-      console.log(`🔧 使用するツール: ${braveSearchToolName}`);
-      const braveSearchTool = tools[braveSearchToolName];
+      console.log(`🔧 使用するツール: ${targetToolName}`);
+      const searchTool = tools[targetToolName];
       
       // Mastraツールとして実行
       console.log('📝 ツール実行パラメータ:', {
         query,
-        count,
+        numResults,
+        searchType,
       });
       
-      const searchResult = await braveSearchTool.execute({
-        context: {
-          query,
-          count,
-        },
+      // Exaツールのパラメータ名に合わせて調整
+      const toolParams: Record<string, unknown> = {
+        query,
+      };
+      
+      // numResultsパラメータ名の調整（ツールによって異なる可能性）
+      if (searchType === 'web') {
+        toolParams.num_results = numResults;
+      } else {
+        toolParams.numResults = numResults;
+      }
+      
+      const searchResult = await searchTool.execute({
+        context: toolParams,
         mastra,
         runtimeContext,
       });
       
-      console.log('✅ Brave MCP検索完了');
+      console.log('✅ Exa MCP検索完了');
       console.log('📊 検索結果:', searchResult);
       console.log('📊 検索結果のタイプ:', typeof searchResult);
       console.log('📊 検索結果のキー:', searchResult ? Object.keys(searchResult) : 'null');
@@ -129,9 +172,10 @@ export const braveMCPSearchTool = createTool({
       return {
         searchResults: resultString,
         success: true,
+        toolUsed: targetToolName,
       };
     } catch (error) {
-      console.error('❌ Brave MCP検索エラー:', error);
+      console.error('❌ Exa MCP検索エラー:', error);
       console.error('エラーの詳細:', {
         name: error instanceof Error ? error.name : 'Unknown',
         message: error instanceof Error ? error.message : String(error),
@@ -143,4 +187,4 @@ export const braveMCPSearchTool = createTool({
       };
     }
   },
-}); 
+});

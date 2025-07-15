@@ -1,20 +1,8 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import path from 'path';
-import fs from 'fs/promises';
+import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
 
 
-// ジョブの保存ディレクトリ
-const JOB_RESULTS_DIR = path.join(process.cwd(), '.job-results');
-
-// ディレクトリの初期化
-const ensureJobResultsDir = async () => {
-  try {
-    await fs.access(JOB_RESULTS_DIR);
-  } catch {
-    await fs.mkdir(JOB_RESULTS_DIR, { recursive: true });
-  }
-};
 
 // バックグラウンドでワークフローを実行
 const executeAgentNetworkWorkflow = async (
@@ -57,15 +45,7 @@ const executeAgentNetworkWorkflow = async (
     const run = await workflowInstance.createRunAsync({ runId: jobId });
 
     // ジョブステータスを実行中に更新
-    await ensureJobResultsDir();
-    const jobStatusPath = path.join(JOB_RESULTS_DIR, `${jobId}.json`);
-    await fs.writeFile(jobStatusPath, JSON.stringify({
-      jobId,
-      status: 'running',
-      workflowId: 'agent-network-workflow',
-      taskType: inputData.taskType,
-      createdAt: new Date().toISOString(),
-    }, null, 2));
+    updateJobStatus(jobId, 'running');
 
     // ワークフローの完了を待つ
     const result = await run.start({ inputData, runtimeContext });
@@ -76,32 +56,18 @@ const executeAgentNetworkWorkflow = async (
       timestamp: new Date().toISOString()
     });
 
-    // 結果をファイルに保存
-    const finalResult = {
-      jobId,
-      status: 'completed',
-      workflowId: 'agent-network-workflow',
-      taskType: inputData.taskType,
-      result: result,
-      completedAt: new Date().toISOString(),
-    };
-
-    await fs.writeFile(jobStatusPath, JSON.stringify(finalResult, null, 2));
-    console.log('💾 ジョブ結果を保存しました:', jobStatusPath);
+    // 結果を保存
+    updateJobStatus(jobId, 'completed');
+    storeJobResult(jobId, result, 'agent-network-workflow');
+    console.log('💾 ジョブ結果を保存しました:', jobId);
 
   } catch (error) {
     console.error('❌ エージェントネットワークワークフローエラー:', error);
     
     // エラー時もステータスを保存
-    const jobStatusPath = path.join(JOB_RESULTS_DIR, `${jobId}.json`);
-    await fs.writeFile(jobStatusPath, JSON.stringify({
-      jobId,
-      status: 'failed',
-      workflowId: 'agent-network-workflow',
-      taskType: inputData.taskType,
-      error: error instanceof Error ? error.message : 'Unknown error',
-      failedAt: new Date().toISOString(),
-    }, null, 2));
+    updateJobStatus(jobId, 'failed', {
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 };
 
@@ -141,15 +107,7 @@ export const agentNetworkTool = createTool({
     });
 
     // ジョブを初期化
-    await ensureJobResultsDir();
-    const jobStatusPath = path.join(JOB_RESULTS_DIR, `${jobId}.json`);
-    await fs.writeFile(jobStatusPath, JSON.stringify({
-      jobId,
-      status: 'queued',
-      taskType,
-      taskDescription,
-      createdAt: new Date().toISOString(),
-    }, null, 2));
+    initializeJob(jobId);
 
     // バックグラウンドでワークフローを実行
     setTimeout(() => {
