@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
+import { initializeJob, updateJobStatus, storeJobResult } from '../job-status-tool';
 
 export const webSearchTool = createTool({
   id: 'web-search-queue',
@@ -36,7 +36,7 @@ export const webSearchTool = createTool({
     // バックグラウンドでワークフローを非同期実行
     // 遅延読み込みでMastraインスタンスを取得
     setTimeout(() => {
-      import('../index').then(({ mastra: mastraInstance }) => {
+      import('../../index').then(({ mastra: mastraInstance }) => {
         if (mastraInstance) {
           executeWorkflowInBackground(mastraInstance, jobId, { query, maxResults, language }, runtimeContext)
             .catch(error => {

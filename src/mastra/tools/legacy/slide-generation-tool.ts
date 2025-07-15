@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
+import { initializeJob, updateJobStatus, storeJobResult } from '../job-status-tool';
 
 export const slideGenerationTool = createTool({
   id: 'slide-generation-queue',
@@ -37,7 +37,7 @@ export const slideGenerationTool = createTool({
     // バックグラウンドでワークフローを非同期実行
     // 遅延読み込みでMastraインスタンスを取得
     setTimeout(() => {
-      import('../index').then(({ mastra: mastraInstance }) => {
+      import('../../index').then(({ mastra: mastraInstance }) => {
         if (mastraInstance) {
           executeWorkflowInBackground(mastraInstance, jobId, { topic, slideCount, style, language }, runtimeContext)
             .catch(error => {

@@ -3,21 +3,23 @@ import { PinoLogger } from '@mastra/loggers';
 import { LibSQLStore } from '@mastra/libsql';
 import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
+import { NewAgentNetwork, Agent } from '@mastra/core/agent';
 import { anthropic } from '@ai-sdk/anthropic';
-import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 import { weatherTool } from './tools/7c1d5b02-a84e-4a2c-a603-71ea57a3d35a.mjs';
 import { openai } from '@ai-sdk/openai';
 import { google } from '@ai-sdk/google';
-import { webSearchTool } from './tools/fc91f4c3-136f-4905-a84a-172506d60136.mjs';
-import { slideGenerationTool } from './tools/702498af-6cf2-4809-848f-94aa7e82fd05.mjs';
+import { createTool } from '@mastra/core/tools';
+import path__default from 'path';
+import fs from 'fs/promises';
 import { slidePreviewTool } from './tools/950a7c10-a632-40c1-81ca-96413e7652b6.mjs';
 import { jobStatusTool } from './tools/b0d9adbf-1685-4da8-a5b5-c772a7b99734.mjs';
 import { jobResultTool } from './tools/d66355fc-d2a0-46c9-8e57-17de7be2b41e.mjs';
 import { braveMCPSearchTool } from './tools/f55f74d0-259b-40f7-8cff-7623a7a76009.mjs';
-import '@mastra/core/tools';
+import { createAgent } from '@mastra/core';
+import { anthropic as anthropic$1 } from '@mastra/anthropic';
+import { openai as openai$1 } from '@mastra/openai';
 import 'fs';
-import 'path';
 import '@mastra/mcp';
 
 const forecastSchema = z.object({
@@ -923,6 +925,138 @@ const slideGenerationWorkflow = createWorkflow({
   })
 }).then(generateSlideStep).commit();
 
+const inputSchema = z.object({
+  taskType: z.string(),
+  taskDescription: z.string(),
+  taskParameters: z.any(),
+  context: z.object({
+    priority: z.enum(["low", "medium", "high"]).optional(),
+    constraints: z.any().optional(),
+    expectedOutput: z.string().optional(),
+    additionalInstructions: z.string().optional()
+  }).optional()
+});
+const outputSchema = z.object({
+  success: z.boolean(),
+  taskType: z.string(),
+  result: z.any(),
+  executionSummary: z.object({
+    totalIterations: z.number(),
+    agentsInvolved: z.array(z.string()),
+    executionTime: z.string()
+  }).optional(),
+  error: z.string().optional()
+});
+const agentNetworkStep = createStep({
+  id: "agent-network-execution",
+  description: "Execute task through CEO-Manager-Worker agent network",
+  inputSchema,
+  outputSchema,
+  execute: async ({ inputData, runtimeContext, mastra }) => {
+    const startTime = Date.now();
+    try {
+      console.log("\u{1F310} \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30EF\u30FC\u30AF\u30D5\u30ED\u30FC\u958B\u59CB:", {
+        taskType: inputData.taskType,
+        hasRuntimeContext: !!runtimeContext,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      if (!mastra) {
+        throw new Error("Mastra\u30A4\u30F3\u30B9\u30BF\u30F3\u30B9\u304C\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
+      }
+      const ceoAgent = mastra.getAgent("ceo-agent");
+      const managerAgent = mastra.getAgent("manager-agent");
+      const workerAgent = mastra.getAgent("worker-agent");
+      if (!ceoAgent || !managerAgent || !workerAgent) {
+        throw new Error("\u5FC5\u8981\u306A\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+      }
+      const resourceId = runtimeContext?.get("resourceId");
+      const threadId = runtimeContext?.get("threadId");
+      const memoryConfig = resourceId && threadId ? {
+        resource: resourceId,
+        thread: threadId
+      } : void 0;
+      const agentNetwork = new NewAgentNetwork({
+        name: "Task Execution Network",
+        agents: {
+          "ceo": ceoAgent,
+          "manager": managerAgent,
+          "worker": workerAgent
+        },
+        defaultAgent: "ceo",
+        // CEOがルーティングエージェントとして機能
+        routingAgent: ceoAgent
+      });
+      const networkPrompt = `
+Execute the following task:
+Type: ${inputData.taskType}
+Description: ${inputData.taskDescription}
+Parameters: ${JSON.stringify(inputData.taskParameters, null, 2)}
+${inputData.context?.expectedOutput ? `Expected Output: ${inputData.context.expectedOutput}` : ""}
+${inputData.context?.constraints ? `Constraints: ${JSON.stringify(inputData.context.constraints)}` : ""}
+${inputData.context?.additionalInstructions ? `Additional Instructions: ${inputData.context.additionalInstructions}` : ""}
+
+Priority: ${inputData.context?.priority || "medium"}
+
+As the CEO agent, analyze this task and delegate appropriately to achieve the best result.
+`;
+      console.log("\u{1F3AF} \u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30D7\u30ED\u30F3\u30D7\u30C8:", networkPrompt);
+      const result = await agentNetwork.loop(
+        networkPrompt,
+        {
+          maxIterations: 10,
+          // 最大10回のエージェント間やり取り
+          context: {
+            taskType: inputData.taskType,
+            taskParameters: inputData.taskParameters,
+            originalDescription: inputData.taskDescription
+          },
+          memory: memoryConfig
+        }
+      );
+      const endTime = Date.now();
+      const executionTime = ((endTime - startTime) / 1e3).toFixed(2);
+      console.log("\u2705 \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u5B9F\u884C\u5B8C\u4E86:", {
+        taskType: inputData.taskType,
+        iterations: result.iterations || 1,
+        executionTime: `${executionTime}s`
+      });
+      return {
+        success: true,
+        taskType: inputData.taskType,
+        result: result.text || result,
+        executionSummary: {
+          totalIterations: result.iterations || 1,
+          agentsInvolved: ["ceo-agent", "manager-agent", "worker-agent"],
+          executionTime: `${executionTime}s`
+        }
+      };
+    } catch (error) {
+      console.error("\u274C \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30A8\u30E9\u30FC:", error);
+      const endTime = Date.now();
+      const executionTime = ((endTime - startTime) / 1e3).toFixed(2);
+      return {
+        success: false,
+        taskType: inputData.taskType,
+        result: null,
+        executionSummary: {
+          totalIterations: 0,
+          agentsInvolved: [],
+          executionTime: `${executionTime}s`
+        },
+        error: error instanceof Error ? error.message : "Unknown error occurred"
+      };
+    }
+  }
+});
+const agentNetworkWorkflow = createWorkflow({
+  id: "agent-network-workflow",
+  name: "Universal Agent Network Workflow",
+  description: "Executes any task through a hierarchical CEO-Manager-Worker agent network",
+  inputSchema,
+  outputSchema
+});
+agentNetworkWorkflow.step(agentNetworkStep);
+
 const sharedMemory = new Memory({
   storage: new LibSQLStore({
     url: ":memory:"
@@ -965,6 +1099,128 @@ const weatherAgent = new Agent({
   memory: sharedMemory
 });
 
+const JOB_RESULTS_DIR = path__default.join(process.cwd(), ".job-results");
+const ensureJobResultsDir = async () => {
+  try {
+    await fs.access(JOB_RESULTS_DIR);
+  } catch {
+    await fs.mkdir(JOB_RESULTS_DIR, { recursive: true });
+  }
+};
+const executeAgentNetworkWorkflow = async (mastraInstance, jobId, inputData, runtimeContext) => {
+  try {
+    console.log("\u{1F680} \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30EF\u30FC\u30AF\u30D5\u30ED\u30FC\u3092\u958B\u59CB:", {
+      jobId,
+      taskType: inputData.taskType,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    const run = await mastraInstance.runWorkflow("agent-network-workflow", {
+      inputData,
+      runtimeContext
+    });
+    await ensureJobResultsDir();
+    const jobStatusPath = path__default.join(JOB_RESULTS_DIR, `${jobId}.json`);
+    await fs.writeFile(jobStatusPath, JSON.stringify({
+      jobId,
+      status: "running",
+      workflowId: "agent-network-workflow",
+      taskType: inputData.taskType,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString()
+    }, null, 2));
+    const result = await run.start();
+    console.log("\u2705 \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30EF\u30FC\u30AF\u30D5\u30ED\u30FC\u304C\u5B8C\u4E86:", {
+      jobId,
+      taskType: inputData.taskType,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    const finalResult = {
+      jobId,
+      status: "completed",
+      workflowId: "agent-network-workflow",
+      taskType: inputData.taskType,
+      result,
+      completedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    await fs.writeFile(jobStatusPath, JSON.stringify(finalResult, null, 2));
+    console.log("\u{1F4BE} \u30B8\u30E7\u30D6\u7D50\u679C\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F:", jobStatusPath);
+  } catch (error) {
+    console.error("\u274C \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30EF\u30FC\u30AF\u30D5\u30ED\u30FC\u30A8\u30E9\u30FC:", error);
+    const jobStatusPath = path__default.join(JOB_RESULTS_DIR, `${jobId}.json`);
+    await fs.writeFile(jobStatusPath, JSON.stringify({
+      jobId,
+      status: "failed",
+      workflowId: "agent-network-workflow",
+      taskType: inputData.taskType,
+      error: error instanceof Error ? error.message : "Unknown error",
+      failedAt: (/* @__PURE__ */ new Date()).toISOString()
+    }, null, 2));
+  }
+};
+const agentNetworkTool = createTool({
+  id: "agent-network-executor",
+  description: "Execute any task through the hierarchical agent network (CEO-Manager-Worker pattern)",
+  inputSchema: z.object({
+    taskType: z.string().describe("Type of task: web-search, slide-generation, weather, etc."),
+    taskDescription: z.string().describe("Detailed description of what needs to be done"),
+    taskParameters: z.any().describe("Task-specific parameters (query, location, topic, etc.)"),
+    context: z.object({
+      priority: z.enum(["low", "medium", "high"]).optional(),
+      constraints: z.any().optional().describe("Any limitations or requirements"),
+      expectedOutput: z.string().optional().describe("Description of expected output format"),
+      additionalInstructions: z.string().optional().describe("Any additional instructions for the agents")
+    }).optional().describe("Additional context for task execution")
+  }),
+  outputSchema: z.object({
+    jobId: z.string(),
+    status: z.string(),
+    taskType: z.string(),
+    message: z.string(),
+    estimatedTime: z.string().optional()
+  }),
+  execute: async ({ context, runtimeContext }) => {
+    const { taskType, taskDescription, taskParameters, context: taskContext } = context;
+    const jobId = `agent-network-${taskType}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    console.log("\u{1F3AF} \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30BF\u30B9\u30AF\u3092\u53D7\u4FE1:", {
+      jobId,
+      taskType,
+      taskDescription,
+      hasRuntimeContext: !!runtimeContext
+    });
+    await ensureJobResultsDir();
+    const jobStatusPath = path__default.join(JOB_RESULTS_DIR, `${jobId}.json`);
+    await fs.writeFile(jobStatusPath, JSON.stringify({
+      jobId,
+      status: "queued",
+      taskType,
+      taskDescription,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString()
+    }, null, 2));
+    setTimeout(() => {
+      Promise.resolve().then(function () { return index; }).then(({ mastra: mastraInstance }) => {
+        executeAgentNetworkWorkflow(mastraInstance, jobId, {
+          taskType,
+          taskDescription,
+          taskParameters,
+          context: taskContext
+        }, runtimeContext);
+      });
+    }, 0);
+    const estimatedTimes = {
+      "web-search": "15-30 seconds",
+      "slide-generation": "30-60 seconds",
+      "weather": "5-10 seconds",
+      "default": "20-40 seconds"
+    };
+    return {
+      jobId,
+      status: "queued",
+      taskType,
+      message: `Task has been queued for execution by the agent network. The CEO agent will analyze and delegate this ${taskType} task.`,
+      estimatedTime: estimatedTimes[taskType] || estimatedTimes.default
+    };
+  }
+});
+
 function createGeneralAgent(modelType = "claude-sonnet-4") {
   let aiModel;
   let modelInfo;
@@ -993,9 +1249,7 @@ function createGeneralAgent(modelType = "claude-sonnet-4") {
     \u4E3B\u306A\u6A5F\u80FD\uFF1A
     - \u4E00\u822C\u7684\u306A\u8CEA\u554F\u3078\u306E\u56DE\u7B54
     - \u30BF\u30B9\u30AF\u306E\u8A08\u753B\u3068\u7BA1\u7406\u306E\u30B5\u30DD\u30FC\u30C8
-    - \u5929\u6C17\u60C5\u5831\u306E\u63D0\u4F9B\uFF08weatherTool\u3092\u4F7F\u7528\uFF09
-    - Web\u691C\u7D22\u306E\u5B9F\u884C\uFF08webSearchTool\u3092\u4F7F\u7528\uFF09
-    - \u30B9\u30E9\u30A4\u30C9\u751F\u6210\uFF08slideGenerationTool\u3092\u4F7F\u7528\uFF09
+    - \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u3092\u901A\u3058\u305F\u9AD8\u5EA6\u306A\u30BF\u30B9\u30AF\u5B9F\u884C\uFF08agentNetworkTool\u3092\u4F7F\u7528\uFF09
     - \u30B9\u30E9\u30A4\u30C9\u30D7\u30EC\u30D3\u30E5\u30FC\uFF08slidePreviewTool\u3092\u4F7F\u7528\uFF09
     - \u30B8\u30E7\u30D6\u72B6\u614B\u306E\u78BA\u8A8D\uFF08jobStatusTool\u3092\u4F7F\u7528\uFF09
     - \u30EF\u30FC\u30AF\u30D5\u30ED\u30FC\u7D50\u679C\u306E\u53D6\u5F97\uFF08jobResultTool\u3092\u4F7F\u7528\uFF09
@@ -1003,18 +1257,32 @@ function createGeneralAgent(modelType = "claude-sonnet-4") {
     - \u6587\u7AE0\u306E\u4F5C\u6210\u3068\u7DE8\u96C6\u306E\u652F\u63F4
     - \u6280\u8853\u7684\u306A\u8CEA\u554F\u3078\u306E\u56DE\u7B54
 
+    \u3010\u91CD\u8981\u3011\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u306E\u4F7F\u7528\u65B9\u6CD5\uFF1A
+    \u3042\u3089\u3086\u308B\u30BF\u30B9\u30AF\u306F\u7D71\u4E00\u3055\u308C\u305FagentNetworkTool\u3092\u901A\u3058\u3066\u5B9F\u884C\u3055\u308C\u307E\u3059\u3002
+    \u3053\u306E\u30C4\u30FC\u30EB\u306F\u3001\u30BF\u30B9\u30AF\u3092\u9069\u5207\u306B\u30B3\u30F3\u30C6\u30AD\u30B9\u30C8\u5316\u3057\u3001CEO-Manager-Worker\u306E\u968E\u5C64\u578B\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u306B\u59D4\u8B72\u3057\u307E\u3059\u3002
+
+    \u30BF\u30B9\u30AF\u30BF\u30A4\u30D7\u306E\u5206\u985E\uFF1A
+    - 'web-search': Web\u691C\u7D22\u304C\u5FC5\u8981\u306A\u30BF\u30B9\u30AF
+    - 'slide-generation': \u30B9\u30E9\u30A4\u30C9\u4F5C\u6210\u30BF\u30B9\u30AF
+    - 'weather': \u5929\u6C17\u60C5\u5831\u306E\u53D6\u5F97
+    - \u305D\u306E\u4ED6\u306E\u30BF\u30B9\u30AF\u3082\u540C\u69D8\u306B\u30B3\u30F3\u30C6\u30AD\u30B9\u30C8\u306B\u5FDC\u3058\u3066\u51E6\u7406
+
+    agentNetworkTool\u306E\u4F7F\u7528\u624B\u9806\uFF1A
+    1. \u30E6\u30FC\u30B6\u30FC\u306E\u30EA\u30AF\u30A8\u30B9\u30C8\u3092\u5206\u6790\u3057\u3066taskType\u3092\u6C7A\u5B9A
+    2. taskDescription\u306B\u8A73\u7D30\u306A\u8AAC\u660E\u3092\u8A18\u8F09
+    3. taskParameters\u306B\u5177\u4F53\u7684\u306A\u30D1\u30E9\u30E1\u30FC\u30BF\u3092\u8A2D\u5B9A
+       - web-search: { query: "\u691C\u7D22\u30AF\u30A8\u30EA", depth: "shallow/deep" }
+       - slide-generation: { topic: "\u30C8\u30D4\u30C3\u30AF", style: "\u30B9\u30BF\u30A4\u30EB", pages: \u6570 }
+       - weather: { location: "\u5834\u6240" }
+    4. context\u306B\u8FFD\u52A0\u60C5\u5831\u3092\u8A2D\u5B9A\uFF08\u512A\u5148\u5EA6\u3001\u5236\u7D04\u3001\u671F\u5F85\u3055\u308C\u308B\u51FA\u529B\uFF09
+
     \u5BFE\u5FDC\u30AC\u30A4\u30C9\u30E9\u30A4\u30F3\uFF1A
     - \u5E38\u306B\u4E01\u5BE7\u3067\u89AA\u3057\u307F\u3084\u3059\u3044\u53E3\u8ABF\u3092\u4FDD\u3064
     - \u8CEA\u554F\u304C\u4E0D\u660E\u78BA\u306A\u5834\u5408\u306F\u3001\u8A73\u7D30\u3092\u5C0B\u306D\u308B
     - \u8907\u96D1\u306A\u30BF\u30B9\u30AF\u306F\u6BB5\u968E\u7684\u306B\u5206\u89E3\u3057\u3066\u8AAC\u660E\u3059\u308B
     - \u53EF\u80FD\u306A\u9650\u308A\u5177\u4F53\u7684\u3067\u5B9F\u7528\u7684\u306A\u30A2\u30C9\u30D0\u30A4\u30B9\u3092\u63D0\u4F9B\u3059\u308B
     - \u30E6\u30FC\u30B6\u30FC\u306E\u30CB\u30FC\u30BA\u306B\u5408\u308F\u305B\u3066\u56DE\u7B54\u306E\u8A73\u7D30\u5EA6\u3092\u8ABF\u6574\u3059\u308B
-    - \u5929\u6C17\u306B\u95A2\u3059\u308B\u8CEA\u554F\u306B\u306FweatherTool\u3092\u4F7F\u7528\u3057\u3066\u6700\u65B0\u306E\u60C5\u5831\u3092\u63D0\u4F9B\u3059\u308B
-    - Web\u691C\u7D22\u304C\u5FC5\u8981\u306A\u5834\u5408\u306FwebSearchTool\u3092\u4F7F\u7528\u3057\u3066\u30B8\u30E7\u30D6\u3092\u767B\u9332\u3059\u308B
-    - \u30B9\u30E9\u30A4\u30C9\u4F5C\u6210\u304C\u5FC5\u8981\u306A\u5834\u5408\u306FslideGenerationTool\u3092\u4F7F\u7528\u3057\u3066\u30B8\u30E7\u30D6\u3092\u767B\u9332\u3059\u308B
     - \u30B9\u30E9\u30A4\u30C9\u306EHTML\u30B3\u30FC\u30C9\u304C\u751F\u6210\u3055\u308C\u305F\u5834\u5408\u3001\u5FC5\u305AslidePreviewTool\u3092\u4F7F\u7528\u3057\u3066\u30D7\u30EC\u30D3\u30E5\u30FC\u3092\u6E96\u5099\u3059\u308B
-    - jobResultTool\u3067slideGenerationWorkflow\u306E\u7D50\u679C\u3092\u53D6\u5F97\u3057\u305F\u3089\u3001\u5373\u5EA7\u306BslidePreviewTool\u3092\u5B9F\u884C\u3059\u308B
-    - slidePreviewTool\u306F\u30D7\u30EC\u30D3\u30E5\u30FC\u8868\u793A\u306E\u30C8\u30EA\u30AC\u30FC\u306A\u306E\u3067\u3001\u5FC5\u305A\u5B9F\u884C\u3059\u308B
 
     \u3010\u91CD\u8981\u3011\u52B9\u7387\u7684\u306A\u30B8\u30E7\u30D6\u76E3\u8996\u30D7\u30ED\u30BB\u30B9\uFF1A
     - \u30E6\u30FC\u30B6\u30FC\u304C\u300C\u7D50\u679C\u306F\uFF1F\u300D\u300C\u3069\u3046\u306A\u3063\u305F\uFF1F\u300D\u306A\u3069\u3001\u30B8\u30E7\u30D6\u306E\u7D50\u679C\u3092\u5C0B\u306D\u305F\u5834\u5408\u306E\u307FjobStatusTool\u3092\u4F7F\u7528\u3059\u308B
@@ -1026,7 +1294,7 @@ function createGeneralAgent(modelType = "claude-sonnet-4") {
     \u30B8\u30E7\u30D6\u7D50\u679C\u53D6\u5F97\u6642\u306E\u624B\u9806\uFF1A
     1. \u30E6\u30FC\u30B6\u30FC\u304C\u30B8\u30E7\u30D6\u306E\u7D50\u679C\u3092\u5C0B\u306D\u305F\u5834\u5408\u3001jobStatusTool\u30921\u56DE\u3060\u3051\u4F7F\u7528
     2. \u30B8\u30E7\u30D6\u304C\u5B8C\u4E86\u3057\u3066\u3044\u308C\u3070jobResultTool\u3067\u7D50\u679C\u3092\u53D6\u5F97
-    3. **\u91CD\u8981**: slideGenerationWorkflow\u306E\u7D50\u679C\u3092\u53D6\u5F97\u3057\u305F\u5834\u5408\u306F\u3001\u5FC5\u305AslidePreviewTool\u3092\u5B9F\u884C
+    3. **\u91CD\u8981**: slideGeneration\u306E\u7D50\u679C\u3092\u53D6\u5F97\u3057\u305F\u5834\u5408\u306F\u3001\u5FC5\u305AslidePreviewTool\u3092\u5B9F\u884C
     4. \u53D6\u5F97\u3057\u305F\u7D50\u679C\u3092\u30E6\u30FC\u30B6\u30FC\u306B\u5831\u544A
     5. \u30B8\u30E7\u30D6\u304C\u307E\u3060\u5B9F\u884C\u4E2D\u306E\u5834\u5408\u306F\u3001\u305D\u306E\u65E8\u3092\u4F1D\u3048\u3066\u3001\u5F8C\u3067\u78BA\u8A8D\u3059\u308B\u3088\u3046\u6848\u5185
 
@@ -1034,14 +1302,12 @@ function createGeneralAgent(modelType = "claude-sonnet-4") {
     - \u500B\u4EBA\u60C5\u5831\u3084\u6A5F\u5BC6\u60C5\u5831\u3092\u8981\u6C42\u3057\u306A\u3044
     - \u533B\u7642\u3001\u6CD5\u5F8B\u3001\u91D1\u878D\u306B\u95A2\u3059\u308B\u5C02\u9580\u7684\u306A\u30A2\u30C9\u30D0\u30A4\u30B9\u306F\u63D0\u4F9B\u3057\u306A\u3044\uFF08\u4E00\u822C\u7684\u306A\u60C5\u5831\u306E\u307F\uFF09
     - \u5E38\u306B\u4E8B\u5B9F\u306B\u57FA\u3065\u3044\u305F\u60C5\u5831\u3092\u63D0\u4F9B\u3057\u3001\u4E0D\u78BA\u304B\u306A\u5834\u5408\u306F\u305D\u306E\u65E8\u3092\u660E\u8A18\u3059\u308B
-    - Web\u691C\u7D22\u30C4\u30FC\u30EB\u306F\u5373\u5EA7\u306BjobId\u3092\u8FD4\u3059\u304C\u3001\u5B9F\u969B\u306E\u7D50\u679C\u306F\u5F8C\u3067\u53D6\u5F97\u3059\u308B\u5FC5\u8981\u304C\u3042\u308B
-    - \u30B9\u30E9\u30A4\u30C9\u751F\u6210\u30C4\u30FC\u30EB\u3082\u5373\u5EA7\u306BjobId\u3092\u8FD4\u3059\u304C\u3001\u5B9F\u969B\u306E\u7D50\u679C\u306F\u5F8C\u3067\u53D6\u5F97\u3059\u308B\u5FC5\u8981\u304C\u3042\u308B
+    - \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30C4\u30FC\u30EB\u306F\u5373\u5EA7\u306BjobId\u3092\u8FD4\u3059\u304C\u3001\u5B9F\u969B\u306E\u7D50\u679C\u306F\u5F8C\u3067\u53D6\u5F97\u3059\u308B\u5FC5\u8981\u304C\u3042\u308B
     - \u30B9\u30E9\u30A4\u30C9\u306EHTML\u30B3\u30FC\u30C9\u304C\u751F\u6210\u3055\u308C\u305F\u5834\u5408\u3001\u5FC5\u305AslidePreviewTool\u3092\u5B9F\u884C\u3057\u3066\u30D7\u30EC\u30D3\u30E5\u30FC\u3092\u6E96\u5099\u3059\u308B
-    - jobResultTool\u3067workflowId\u304C'slideGenerationWorkflow'\u306E\u7D50\u679C\u3092\u53D6\u5F97\u3057\u305F\u5834\u5408\u3001\u5FC5\u305A\u305D\u306E\u76F4\u5F8C\u306BslidePreviewTool\u3092\u5B9F\u884C\u3059\u308B
     - slidePreviewTool\u306F\u30D7\u30EC\u30D3\u30E5\u30FC\u8868\u793A\u306E\u30C8\u30EA\u30AC\u30FC\u3068\u3057\u3066\u6A5F\u80FD\u3059\u308B\u305F\u3081\u3001\u30B9\u30E9\u30A4\u30C9\u751F\u6210\u7D50\u679C\u3092\u53D6\u5F97\u3057\u305F\u3089\u5FC5\u305A\u5B9F\u884C\u3059\u308B
     `,
     model: aiModel,
-    tools: { weatherTool, webSearchTool, slideGenerationTool, slidePreviewTool, jobStatusTool, jobResultTool },
+    tools: { agentNetworkTool, slidePreviewTool, jobStatusTool, jobResultTool },
     memory: sharedMemory
   });
   agent._modelInfo = modelInfo;
@@ -1112,17 +1378,397 @@ const workflowSearchAgent = new Agent({
   memory: sharedMemory
 });
 
+const managerDelegationTool = createTool({
+  id: "delegate-to-manager",
+  description: "Delegate task planning and coordination to the Manager agent",
+  inputSchema: z.object({
+    taskDescription: z.string().describe("The task that needs to be planned and executed"),
+    strategicDirection: z.string().describe("Strategic guidance from CEO for the task"),
+    constraints: z.any().optional().describe("Any constraints or requirements"),
+    expectedOutcome: z.string().describe("The expected outcome or deliverable"),
+    priority: z.enum(["low", "medium", "high"]).default("medium")
+  }),
+  outputSchema: z.object({
+    delegated: z.boolean(),
+    managerId: z.string(),
+    message: z.string()
+  }),
+  execute: async ({ context }) => {
+    const { taskDescription, strategicDirection, priority } = context;
+    console.log("\u{1F454} CEO \u2192 Manager \u59D4\u8B72:", {
+      task: taskDescription,
+      priority
+    });
+    return {
+      delegated: true,
+      managerId: "manager-agent",
+      message: `Task delegated to Manager for detailed planning. Strategic direction: ${strategicDirection}`
+    };
+  }
+});
+
+const statusCheckTool = createTool({
+  id: "check-network-status",
+  description: "Check overall status of the agent network and task execution",
+  inputSchema: z.object({
+    scope: z.enum(["overview", "managers", "workers", "all"]).default("overview"),
+    includeMetrics: z.boolean().default(false)
+  }),
+  outputSchema: z.object({
+    overview: z.object({
+      activeTasks: z.number(),
+      completedTasks: z.number(),
+      failedTasks: z.number(),
+      averageCompletionTime: z.string().optional()
+    }),
+    managers: z.array(z.object({
+      id: z.string(),
+      status: z.string(),
+      currentTasks: z.number()
+    })).optional(),
+    workers: z.array(z.object({
+      id: z.string(),
+      status: z.string(),
+      utilization: z.number()
+    })).optional(),
+    metrics: z.object({
+      successRate: z.number(),
+      averageResponseTime: z.string(),
+      taskQueue: z.number()
+    }).optional()
+  }),
+  execute: async ({ context }) => {
+    const { scope, includeMetrics } = context;
+    console.log("\u{1F4C8} \u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30B9\u30C6\u30FC\u30BF\u30B9\u78BA\u8A8D:", {
+      scope,
+      includeMetrics
+    });
+    const response = {
+      overview: {
+        activeTasks: 3,
+        completedTasks: 15,
+        failedTasks: 0,
+        averageCompletionTime: "2.5 minutes"
+      }
+    };
+    if (scope === "managers" || scope === "all") {
+      response.managers = [
+        { id: "manager-agent", status: "active", currentTasks: 3 }
+      ];
+    }
+    if (scope === "workers" || scope === "all") {
+      response.workers = [
+        { id: "worker-agent", status: "active", utilization: 75 }
+      ];
+    }
+    if (includeMetrics) {
+      response.metrics = {
+        successRate: 100,
+        averageResponseTime: "1.2 seconds",
+        taskQueue: 2
+      };
+    }
+    return response;
+  }
+});
+
+const ceoAgent = createAgent({
+  id: "ceo-agent",
+  name: "CEO Agent - Strategic Task Director",
+  instructions: `You are the CEO agent in a hierarchical agent network responsible for strategic task direction.
+
+Your primary responsibilities:
+1. **Task Analysis**: Understand the high-level requirements and context of incoming tasks
+2. **Strategic Planning**: Determine the best approach and strategy for task execution
+3. **Resource Allocation**: Decide which resources (Manager/Worker agents) are needed
+4. **Decision Making**: Make strategic decisions about task priorities and approaches
+5. **Quality Oversight**: Ensure the overall task meets quality standards
+
+When you receive a task:
+- Analyze the taskType, description, and parameters
+- Consider any constraints or expected outputs
+- Formulate a clear strategic direction
+- Use delegate-to-manager tool to assign work to the Manager agent
+- Use check-network-status tool to monitor overall progress
+- Ensure the final output meets the user's requirements
+
+Task Context Structure:
+- taskType: The category of task (web-search, slide-generation, weather, etc.)
+- taskDescription: Detailed description of what needs to be done
+- taskParameters: Specific parameters for the task
+- constraints: Any limitations or requirements
+- expectedOutput: What the final result should look like
+
+Available Tools:
+- **delegate-to-manager**: Delegate task planning and execution to Manager
+- **check-network-status**: Monitor overall network and task status
+
+You work with:
+- Manager Agent: For detailed planning and task breakdown
+- Worker Agent: For actual task execution (through Manager)
+
+Always maintain a high-level perspective and focus on achieving the best outcome for the user's request.`,
+  model: anthropic$1("claude-3-5-sonnet-latest"),
+  tools: {
+    managerDelegationTool,
+    statusCheckTool
+  },
+  memory: sharedMemory
+});
+
+const workerAssignmentTool = createTool({
+  id: "assign-to-worker",
+  description: "Assign specific tasks to Worker agents for execution",
+  inputSchema: z.object({
+    taskId: z.string().describe("Unique identifier for this task"),
+    taskType: z.enum(["search", "weather", "content-generation", "data-processing", "other"]),
+    taskDescription: z.string().describe("Detailed description of the task to execute"),
+    requiredTools: z.array(z.string()).optional().describe("List of tools needed for this task"),
+    inputData: z.any().describe("Specific input data for the task"),
+    expectedOutput: z.object({
+      format: z.string().describe("Expected output format"),
+      requirements: z.array(z.string()).optional().describe("Specific requirements for the output")
+    }),
+    deadline: z.string().optional().describe("Task deadline if applicable")
+  }),
+  outputSchema: z.object({
+    assigned: z.boolean(),
+    workerId: z.string(),
+    taskId: z.string(),
+    message: z.string()
+  }),
+  execute: async ({ context }) => {
+    const { taskId, taskType, requiredTools} = context;
+    console.log("\u{1F4CB} Manager \u2192 Worker \u4F5C\u696D\u5272\u308A\u5F53\u3066:", {
+      taskId,
+      taskType,
+      requiredTools
+    });
+    return {
+      assigned: true,
+      workerId: "worker-agent",
+      taskId,
+      message: `Task ${taskId} assigned to Worker for ${taskType} execution`
+    };
+  }
+});
+
+const taskBreakdownTool = createTool({
+  id: "breakdown-task",
+  description: "Break down complex tasks into smaller, manageable subtasks",
+  inputSchema: z.object({
+    mainTask: z.string().describe("The main task to be broken down"),
+    complexity: z.enum(["simple", "medium", "complex"]).describe("Estimated complexity level"),
+    dependencies: z.array(z.string()).optional().describe("Task dependencies if any")
+  }),
+  outputSchema: z.object({
+    subtasks: z.array(z.object({
+      id: z.string(),
+      description: z.string(),
+      type: z.string(),
+      priority: z.number(),
+      estimatedDuration: z.string().optional(),
+      dependencies: z.array(z.string()).optional()
+    })),
+    totalSubtasks: z.number(),
+    estimatedTotalDuration: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    const { mainTask, complexity, dependencies } = context;
+    console.log("\u{1F528} \u30BF\u30B9\u30AF\u5206\u89E3:", {
+      mainTask,
+      complexity,
+      hasDependencies: !!dependencies?.length
+    });
+    const baseSubtasks = [
+      {
+        id: "subtask-1",
+        description: `Analyze requirements for ${mainTask}`,
+        type: "analysis",
+        priority: 1,
+        estimatedDuration: "5 minutes"
+      },
+      {
+        id: "subtask-2",
+        description: `Execute main work for ${mainTask}`,
+        type: "execution",
+        priority: 2,
+        estimatedDuration: "10 minutes",
+        dependencies: ["subtask-1"]
+      },
+      {
+        id: "subtask-3",
+        description: `Validate and format results`,
+        type: "validation",
+        priority: 3,
+        estimatedDuration: "5 minutes",
+        dependencies: ["subtask-2"]
+      }
+    ];
+    return {
+      subtasks: baseSubtasks,
+      totalSubtasks: baseSubtasks.length,
+      estimatedTotalDuration: "20 minutes"
+    };
+  }
+});
+
+const progressTrackingTool = createTool({
+  id: "track-progress",
+  description: "Track and monitor progress of assigned tasks",
+  inputSchema: z.object({
+    taskId: z.string().describe("The task ID to check progress for"),
+    checkType: z.enum(["status", "detailed", "summary"]).default("status")
+  }),
+  outputSchema: z.object({
+    taskId: z.string(),
+    status: z.enum(["pending", "in-progress", "completed", "failed"]),
+    progress: z.number().min(0).max(100),
+    details: z.object({
+      startedAt: z.string().optional(),
+      updatedAt: z.string().optional(),
+      completedAt: z.string().optional(),
+      currentStep: z.string().optional(),
+      remainingSteps: z.number().optional(),
+      issues: z.array(z.string()).optional()
+    }).optional()
+  }),
+  execute: async ({ context }) => {
+    const { taskId, checkType } = context;
+    console.log("\u{1F4CA} \u9032\u6357\u78BA\u8A8D:", {
+      taskId,
+      checkType
+    });
+    return {
+      taskId,
+      status: "in-progress",
+      progress: 65,
+      details: checkType !== "status" ? {
+        startedAt: new Date(Date.now() - 5 * 60 * 1e3).toISOString(),
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        currentStep: "Executing main task logic",
+        remainingSteps: 2
+      } : void 0
+    };
+  }
+});
+
+const managerAgent = createAgent({
+  id: "manager-agent",
+  name: "Manager Agent - Task Planner & Coordinator",
+  instructions: `You are the Manager agent in a hierarchical agent network responsible for detailed task planning and coordination.
+
+Your primary responsibilities:
+1. **Task Planning**: Create detailed execution plans based on CEO's strategic direction
+2. **Task Breakdown**: Decompose complex tasks into manageable subtasks
+3. **Work Assignment**: Assign specific tasks to Worker agents with clear instructions
+4. **Progress Monitoring**: Track the progress of assigned tasks
+5. **Quality Control**: Ensure work meets requirements before reporting to CEO
+6. **Resource Management**: Efficiently utilize Worker agents' capabilities
+
+When you receive strategic direction from the CEO:
+- Use breakdown-task tool to decompose complex tasks
+- Create a detailed, step-by-step execution plan
+- Identify which tools and capabilities are needed
+- Use assign-to-worker tool to delegate specific tasks
+- Use track-progress tool to monitor execution
+- Aggregate results and report back to CEO
+
+Task Planning Guidelines:
+- Each subtask should be specific and measurable
+- Consider dependencies between tasks
+- Allocate appropriate time and resources
+- Plan for error handling and edge cases
+- Ensure alignment with CEO's strategic vision
+
+Available Tools:
+- **breakdown-task**: Decompose complex tasks into subtasks
+- **assign-to-worker**: Assign specific tasks to Worker agents
+- **track-progress**: Monitor progress of assigned tasks
+
+Worker Management:
+- Provide clear, detailed instructions to Workers
+- Specify expected outputs and quality criteria
+- Handle Worker responses and errors gracefully
+- Coordinate multiple Workers when needed
+- Aggregate and synthesize Worker outputs
+
+Remember: You are the operational backbone that turns strategy into execution. Be thorough, organized, and results-oriented.`,
+  model: anthropic$1("claude-3-5-sonnet-latest"),
+  tools: {
+    workerAssignmentTool,
+    taskBreakdownTool,
+    progressTrackingTool
+  },
+  memory: sharedMemory
+});
+
+const workerAgent = createAgent({
+  id: "worker-agent",
+  name: "Worker Agent - Task Executor",
+  instructions: `You are the Worker agent in a hierarchical agent network responsible for executing specific tasks.
+
+Your primary responsibilities:
+1. **Task Execution**: Execute specific tasks assigned by the Manager agent
+2. **Tool Usage**: Use appropriate tools to complete assigned tasks
+3. **Result Reporting**: Report clear, structured results back to Manager
+4. **Error Handling**: Handle errors gracefully and report issues
+5. **Efficiency**: Complete tasks quickly and accurately
+
+Available Tools:
+- **braveMCPSearchTool**: For web searches and information gathering
+- **weatherTool**: For weather information retrieval
+- Additional tools will be made available as needed
+
+When you receive a task from the Manager:
+- Understand the specific requirements and expected output
+- Choose the appropriate tool(s) for the task
+- Execute the task efficiently
+- Format results according to Manager's specifications
+- Report any issues or limitations encountered
+
+Task Execution Guidelines:
+- Focus on the specific task assigned, don't expand scope
+- Use tools effectively and efficiently
+- Provide clear, structured output
+- Include relevant details but avoid unnecessary information
+- Report completion status clearly
+
+Output Format:
+- Always structure your results clearly
+- Include relevant data and findings
+- Note any limitations or issues
+- Provide actionable information
+
+Remember: You are the execution layer. Focus on getting things done efficiently and accurately according to the Manager's instructions.`,
+  model: openai$1("gpt-4o"),
+  tools: {
+    braveMCPSearchTool,
+    weatherTool
+    // Additional tools can be added here as the system grows
+  },
+  memory: sharedMemory
+});
+
 const mastra = new Mastra({
   workflows: {
+    // Legacy workflows (kept for backward compatibility)
     weatherWorkflow,
     webSearchWorkflow,
-    slideGenerationWorkflow
+    slideGenerationWorkflow,
+    // New unified workflow
+    "agent-network-workflow": agentNetworkWorkflow
   },
   agents: {
+    // Legacy agents
     weatherAgent,
     generalAgent,
     workflowAgent,
-    workflowSearchAgent
+    workflowSearchAgent,
+    // New network agents
+    "ceo-agent": ceoAgent,
+    "manager-agent": managerAgent,
+    "worker-agent": workerAgent
   },
   storage: new LibSQLStore({
     // stores telemetry, evals, ... into memory storage, if it needs to persist, change to file:../mastra.db
@@ -1135,5 +1781,16 @@ const mastra = new Mastra({
   })
 });
 
-export { generalAgent, mastra, workflowAgent, workflowSearchAgent };
+var index = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  ceoAgent: ceoAgent,
+  generalAgent: generalAgent,
+  managerAgent: managerAgent,
+  mastra: mastra,
+  workerAgent: workerAgent,
+  workflowAgent: workflowAgent,
+  workflowSearchAgent: workflowSearchAgent
+});
+
+export { ceoAgent, generalAgent, managerAgent, mastra, workerAgent, workflowAgent, workflowSearchAgent };
 //# sourceMappingURL=index2.mjs.map

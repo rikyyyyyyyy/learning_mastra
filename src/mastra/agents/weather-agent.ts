@@ -1,7 +1,7 @@
 import { anthropic } from '@ai-sdk/anthropic';
 import { Agent } from '@mastra/core/agent';
 import { sharedMemory } from '../shared-memory';
-import { weatherTool } from '../tools/weather-tool';
+import { weatherTool } from '../tools/legacy/weather-tool';
 
 export const weatherAgent = new Agent({
   name: 'Weather Agent',
