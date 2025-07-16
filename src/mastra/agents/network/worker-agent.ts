@@ -1,5 +1,5 @@
 import { Agent } from '@mastra/core/agent';
-import { openai } from '@ai-sdk/openai';
+import { anthropic } from '@ai-sdk/anthropic';
 import { sharedMemory } from '../../shared-memory';
 import { exaMCPSearchTool } from '../../tools/exa-search-wrapper';
 import { weatherTool } from '../../tools/legacy/weather-tool';
@@ -41,7 +41,7 @@ Output Format:
 - Provide actionable information
 
 Remember: You are the execution layer. Focus on getting things done efficiently and accurately according to the Manager's instructions.`,
-  model: openai('gpt-4o'),
+  model: anthropic('claude-sonnet-4-20250514'),
   tools: { 
     exaMCPSearchTool,
     weatherTool,

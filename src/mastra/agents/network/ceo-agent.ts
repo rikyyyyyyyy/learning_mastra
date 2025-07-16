@@ -39,7 +39,7 @@ You work with:
 - Worker Agent: For actual task execution (through Manager)
 
 Always maintain a high-level perspective and focus on achieving the best outcome for the user's request.`,
-  model: anthropic('claude-3-5-sonnet-latest'),
+  model: anthropic('claude-sonnet-4-20250514'),
   tools: { 
     managerDelegationTool,
     statusCheckTool,

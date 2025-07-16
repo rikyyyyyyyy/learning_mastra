@@ -45,7 +45,7 @@ Worker Management:
 - Aggregate and synthesize Worker outputs
 
 Remember: You are the operational backbone that turns strategy into execution. Be thorough, organized, and results-oriented.`,
-  model: anthropic('claude-3-5-sonnet-latest'),
+  model: anthropic('claude-sonnet-4-20250514'),
   tools: { 
     workerAssignmentTool,
     taskBreakdownTool,

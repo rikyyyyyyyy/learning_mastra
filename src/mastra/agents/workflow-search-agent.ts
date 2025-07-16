@@ -1,6 +1,7 @@
-import { google } from '@ai-sdk/google';
+import { anthropic } from '@ai-sdk/anthropic';
 import { Agent } from '@mastra/core/agent';
 import { sharedMemory } from '../shared-memory';
+import { exaMCPSearchTool } from '../tools/exa-search-wrapper';
 
 export const workflowSearchAgent = new Agent({
   name: 'Workflow Search Agent',
@@ -21,14 +22,7 @@ export const workflowSearchAgent = new Agent({
     - 情報源を明確に示す
     - ユーザーの質問に直接答える形で回答する
   `,
-  model: google('gemini-2.5-flash', {
-    useSearchGrounding: true,
-    // 動的検索の設定（必要に応じて検索を実行）
-    dynamicRetrievalConfig: {
-      mode: 'MODE_DYNAMIC',
-      dynamicThreshold: 0.7  // 検索が必要かどうかの閾値
-    }
-  }),
-  tools: {}, // Google Search groundingは内蔵機能のため、外部ツールは不要
+  model: anthropic('claude-sonnet-4-20250514'),
+  tools: { exaMCPSearchTool }, // exaMCPSearchToolを使用して検索機能を提供
   memory: sharedMemory,
 });
