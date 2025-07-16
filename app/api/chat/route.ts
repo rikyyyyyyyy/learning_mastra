@@ -97,6 +97,10 @@ export async function POST(req: NextRequest) {
               const toolName = chunk.toolName;
               executedTools.push(toolName);
               console.log(`🔧 ツール実行: ${toolName}`);
+              console.log(`🔧 ツール名の詳細確認:`);
+              console.log(`  - 実際の名前: "${toolName}"`);
+              console.log(`  - 長さ: ${toolName.length}`);
+              console.log(`  - 文字コード: ${[...toolName].map(c => c.charCodeAt(0)).join(', ')}`);
               
               // ツール実行イベントを送信
               const event = JSON.stringify({
@@ -105,13 +109,59 @@ export async function POST(req: NextRequest) {
                 args: chunk.args
               }) + '\n';
               controller.enqueue(encoder.encode(event));
+              
+              // agent-network-executorの呼び出しも記録（より詳細に）
+              console.log(`🔍 ツール名チェック1: "${toolName}" === "agent-network-executor" ? ${toolName === 'agent-network-executor'}`);
+              console.log(`🔍 ツール名チェック2: "${toolName}" === "agentNetworkTool" ? ${toolName === 'agentNetworkTool'}`);
+              
+              if (toolName === 'agent-network-executor' || toolName === 'agentNetworkTool') {
+                console.log(`🤖 エージェントネットワークツール呼び出し検出 (${toolName}) - 引数:`, JSON.stringify(chunk.args, null, 2));
+              }
             }
             
             // ツール結果の場合
             if (chunk.type === 'tool-result') {
               console.log(`📊 ツール結果:`, chunk);
               console.log(`📊 ツール名:`, chunk.toolName);
-              console.log(`📊 結果詳細:`, chunk.result);
+              console.log(`📊 結果詳細:`, JSON.stringify(chunk.result, null, 2));
+              
+              // すべてのツール結果をデバッグ用にログ出力
+              console.log(`🔍 ツール結果のデバッグ情報:`);
+              console.log(`  - chunk.type: ${chunk.type}`);
+              console.log(`  - chunk.toolName: ${chunk.toolName}`);
+              console.log(`  - chunk.result: ${JSON.stringify(chunk.result)}`);
+              console.log(`  - typeof chunk.result: ${typeof chunk.result}`);
+              if (chunk.result) {
+                console.log(`  - chunk.result keys: ${Object.keys(chunk.result)}`);
+                console.log(`  - chunk.result.jobId: ${chunk.result.jobId}`);
+              }
+              
+              // すべてのツール結果で特別な処理が必要か確認
+              console.log(`🔍 ツール名の確認: "${chunk.toolName}" === "agent-network-executor"?`, chunk.toolName === 'agent-network-executor');
+              console.log(`🔍 ツール名の確認: "${chunk.toolName}" === "agentNetworkTool"?`, chunk.toolName === 'agentNetworkTool');
+              
+              // agent-network-executorの結果を処理
+              if (chunk.toolName === 'agent-network-executor' || chunk.toolName === 'agentNetworkTool') {
+                console.log(`🤖 エージェントネットワークツール検出 (名前: ${chunk.toolName})`);
+                console.log(`🤖 結果の型:`, typeof chunk.result);
+                console.log(`🤖 結果のキー:`, chunk.result ? Object.keys(chunk.result) : 'null');
+                console.log(`🤖 結果の内容:`, JSON.stringify(chunk.result, null, 2));
+                
+                // jobIdは結果オブジェクトの直接のプロパティ
+                if (chunk.result && chunk.result.jobId) {
+                  console.log(`🤖 エージェントネットワークジョブ開始: ${chunk.result.jobId}`);
+                  const event = JSON.stringify({
+                    type: 'agent-network-job',
+                    jobId: chunk.result.jobId,
+                    taskType: chunk.result.taskType || 'unknown'
+                  }) + '\n';
+                  controller.enqueue(encoder.encode(event));
+                  console.log(`📡 agent-network-jobイベントを送信しました: ${chunk.result.jobId}`);
+                } else {
+                  console.error(`❌ jobIdが見つかりません。結果:`, chunk.result);
+                  console.error(`❌ chunk全体:`, JSON.stringify(chunk, null, 2));
+                }
+              }
               
               // slidePreviewToolの結果を特別に処理
               // ツール名の複数パターンをチェック

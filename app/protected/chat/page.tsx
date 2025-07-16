@@ -1,13 +1,41 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Loader2, MessageSquarePlus, Eye, X, ChevronDown } from "lucide-react";
+import { Send, Bot, User, Loader2, MessageSquarePlus, Eye, X, ChevronDown, FileText, MessageCircle } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+}
+
+interface AgentConversation {
+  agentId: string;
+  agentName: string;
+  message: string;
+  timestamp: string;
+  iteration: number;
+}
+
+interface AgentLogsData {
+  jobId: string;
+  taskType: string;
+  conversationHistory: AgentConversation[];
+  executionSummary: {
+    totalIterations?: number;
+    agentsInvolved?: string[];
+    executionTime?: string;
+  };
+  completedAt?: Date;
 }
 
 type AIModel = "claude-sonnet-4" | "openai-o3" | "gemini-2.5-flash";
@@ -63,6 +91,10 @@ export default function ChatPage() {
       style?: string;
     };
   } | null>(null);
+  const [recentAgentNetworkJobs, setRecentAgentNetworkJobs] = useState<string[]>([]);
+  const [showAgentLogs, setShowAgentLogs] = useState(false);
+  const [currentAgentLogs, setCurrentAgentLogs] = useState<AgentLogsData | null>(null);
+  const [loadingAgentLogs, setLoadingAgentLogs] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messageIdCounter = useRef(0);
@@ -74,7 +106,33 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-
+  // エージェントログを取得する関数
+  const fetchAgentLogs = async (jobId: string) => {
+    setLoadingAgentLogs(true);
+    try {
+      console.log(`📥 エージェントログを取得中: ${jobId}`);
+      
+      const response = await fetch(`/api/agent-logs/${jobId}`);
+      console.log('📡 API応答ステータス:', response.status);
+      
+      if (!response.ok) {
+        console.error('❌ エージェントログの取得に失敗しました:', response.status);
+        const errorText = await response.text();
+        console.error('❌ エラー詳細:', errorText);
+        return;
+      }
+      
+      const logsData = await response.json() as AgentLogsData;
+      console.log('📦 取得したエージェントログ:', logsData);
+      
+      setCurrentAgentLogs(logsData);
+      setShowAgentLogs(true);
+    } catch (error) {
+      console.error('❌ エージェントログの取得エラー:', error);
+    } finally {
+      setLoadingAgentLogs(false);
+    }
+  };
 
   // スライドプレビューを表示する関数
   const showSlidePreviewModal = (previewData: {
@@ -266,11 +324,29 @@ export default function ChatPage() {
               case 'tool-execution':
                 console.log(`🔧 ツール実行検出: ${event.toolName}`);
                 executedTools.push(event.toolName);
+                
+                // agent-network-executorツールの実行を検出（ログのみ）
+                if (event.toolName === 'agent-network-executor' || event.toolName === 'agentNetworkTool') {
+                  console.log(`🤖 エージェントネットワークツール実行検出 (${event.toolName})`);
+                  console.log(`🤖 引数:`, event.args);
+                }
                 break;
                 
               case 'slide-preview-ready':
                 console.log(`🎨 スライドプレビュー準備完了: ${event.jobId}`);
                 slidePreviewJobId = event.jobId;
+                break;
+                
+              case 'agent-network-job':
+                console.log(`🤖 エージェントネットワークジョブ検出: ${event.jobId}`);
+                console.log(`🤖 タスクタイプ: ${event.taskType}`);
+                // 最近のエージェントネットワークジョブリストに追加
+                setRecentAgentNetworkJobs(prev => {
+                  console.log(`📝 現在のジョブリスト:`, prev);
+                  const updated = [event.jobId, ...prev.filter(id => id !== event.jobId)];
+                  console.log(`📝 更新後のジョブリスト:`, updated);
+                  return updated.slice(0, 10); // 最新10件まで保持
+                });
                 break;
                 
               case 'message-complete':
@@ -385,6 +461,107 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
+            
+            {/* エージェントログビューアーボタン */}
+            {(() => {
+              console.log(`🎯 レンダリング時のジョブリスト:`, recentAgentNetworkJobs);
+              console.log(`🎯 ジョブリストの長さ:`, recentAgentNetworkJobs.length);
+              return null;
+            })()}
+            {recentAgentNetworkJobs.length > 0 && (
+              <Dialog open={showAgentLogs} onOpenChange={setShowAgentLogs}>
+                <DialogTrigger asChild>
+                  <button
+                    onClick={() => {
+                      if (recentAgentNetworkJobs.length > 0) {
+                        fetchAgentLogs(recentAgentNetworkJobs[0]);
+                      }
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                  >
+                    <FileText className="w-5 h-5" />
+                    エージェントログ
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <MessageCircle className="w-5 h-5" />
+                      エージェント間の会話履歴
+                    </DialogTitle>
+                    <DialogDescription>
+                      {currentAgentLogs ? `タスク: ${currentAgentLogs.taskType} | 実行時間: ${currentAgentLogs.executionSummary?.executionTime || 'N/A'}` : 'ログを読み込み中...'}
+                    </DialogDescription>
+                  </DialogHeader>
+                  
+                  <div className="mt-4 overflow-y-auto max-h-[60vh]">
+                    {loadingAgentLogs ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
+                      </div>
+                    ) : currentAgentLogs?.conversationHistory ? (
+                      <div className="space-y-4">
+                        {currentAgentLogs.conversationHistory.map((entry, index) => (
+                          <div key={index} className="border-l-2 border-gray-200 dark:border-gray-700 pl-4">
+                            <div className="flex items-start gap-3">
+                              <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold ${
+                                entry.agentId === 'ceo' ? 'bg-purple-600' :
+                                entry.agentId === 'manager' ? 'bg-blue-600' :
+                                'bg-green-600'
+                              }`}>
+                                {entry.agentId === 'ceo' ? 'CEO' :
+                                 entry.agentId === 'manager' ? 'MGR' :
+                                 'WRK'}
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-baseline gap-2 mb-1">
+                                  <h4 className="font-semibold text-gray-900 dark:text-white">
+                                    {entry.agentName}
+                                  </h4>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                                    イテレーション {entry.iteration}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                                  {entry.message}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  {new Date(entry.timestamp).toLocaleTimeString('ja-JP')}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                        会話履歴がありません
+                      </p>
+                    )}
+                  </div>
+                  
+                  {/* ジョブ選択ドロップダウン */}
+                  {recentAgentNetworkJobs.length > 1 && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                      <label className="text-sm text-gray-600 dark:text-gray-400">
+                        他のジョブを表示:
+                      </label>
+                      <select
+                        className="mt-1 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        onChange={(e) => fetchAgentLogs(e.target.value)}
+                        value={currentAgentLogs?.jobId || ''}
+                      >
+                        {recentAgentNetworkJobs.map((jobId) => (
+                          <option key={jobId} value={jobId}>
+                            {jobId}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </DialogContent>
+              </Dialog>
+            )}
             
             <button
               onClick={startNewConversation}
