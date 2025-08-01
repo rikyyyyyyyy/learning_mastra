@@ -24,6 +24,13 @@ interface AgentConversation {
   message: string;
   timestamp: string;
   iteration: number;
+  messageType?: 'request' | 'response' | 'internal';
+  metadata?: {
+    model?: string;
+    tools?: string[];
+    tokenCount?: number;
+    executionTime?: number;
+  };
 }
 
 interface AgentLogsData {
@@ -95,9 +102,14 @@ export default function ChatPage() {
   const [showAgentLogs, setShowAgentLogs] = useState(false);
   const [currentAgentLogs, setCurrentAgentLogs] = useState<AgentLogsData | null>(null);
   const [loadingAgentLogs, setLoadingAgentLogs] = useState(false);
+  const [isRealTimeMode, setIsRealTimeMode] = useState(true);
+  const [realtimeConversations, setRealtimeConversations] = useState<AgentConversation[]>([]);
+  const [sseConnection, setSseConnection] = useState<EventSource | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messageIdCounter = useRef(0);
+  const logScrollRef = useRef<HTMLDivElement>(null);
   
   // threadIdを管理（セッション中は同じthreadIdを使用）
   const threadIdRef = useRef<string>(`thread-${Date.now()}`);
@@ -105,6 +117,112 @@ export default function ChatPage() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
+  // リアルタイムログストリーミングを開始する関数
+  const startRealtimeLogStreaming = (jobId: string) => {
+    // 既存の接続があれば閉じる
+    if (sseConnection) {
+      sseConnection.close();
+    }
+    
+    console.log(`🔴 リアルタイムログストリーミング開始: ${jobId}`);
+    setConnectionStatus('connecting');
+    setRealtimeConversations([]);
+    
+    // リトライ機能付きSSE接続
+    let retryCount = 0;
+    const maxRetries = 3;
+    const retryDelay = 1000; // 1秒
+    
+    const connectSSE = () => {
+      const eventSource = new EventSource(`/api/agent-logs/stream/${jobId}`);
+      
+      eventSource.onopen = () => {
+        console.log('✅ SSE接続確立');
+        setConnectionStatus('connected');
+        retryCount = 0; // リセット
+      };
+      
+      eventSource.addEventListener('connected', (event) => {
+        const data = JSON.parse(event.data);
+        console.log('📡 接続確立:', data);
+      });
+      
+      eventSource.addEventListener('history', (event) => {
+        const data = JSON.parse(event.data);
+        console.log('📜 履歴受信:', data.count, '件');
+        setRealtimeConversations(data.conversationHistory);
+      });
+      
+      eventSource.addEventListener('log-entry', (event) => {
+        const data = JSON.parse(event.data);
+        console.log('📨 新規ログエントリ:', data.entry);
+        setRealtimeConversations(prev => [...prev, data.entry]);
+      });
+      
+      eventSource.addEventListener('job-completed', (event) => {
+        const data = JSON.parse(event.data);
+        console.log('✅ ジョブ完了:', data);
+        setConnectionStatus('disconnected');
+      });
+      
+      eventSource.addEventListener('job-failed', (event) => {
+        const data = JSON.parse(event.data);
+        console.log('❌ ジョブ失敗:', data);
+        setConnectionStatus('error');
+      });
+      
+      eventSource.addEventListener('heartbeat', (event) => {
+        console.log('💓 ハートビート受信');
+      });
+      
+      eventSource.onerror = (error) => {
+        console.error('❌ SSEエラー:', error);
+        console.error('❌ SSE readyState:', eventSource.readyState);
+        
+        // EventSourceのreadyStateをチェック
+        // 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
+        if (eventSource.readyState === 2) {
+          eventSource.close();
+          
+          if (retryCount < maxRetries) {
+            retryCount++;
+            console.log(`🔄 SSE接続をリトライ中 (${retryCount}/${maxRetries})...`);
+            setConnectionStatus('connecting');
+            
+            // 遅延してリトライ
+            setTimeout(() => {
+              connectSSE();
+            }, retryDelay * retryCount);
+          } else {
+            console.error('❌ SSE接続の最大リトライ回数に達しました');
+            setConnectionStatus('error');
+          }
+        }
+      };
+      
+      setSseConnection(eventSource);
+    };
+    
+    // 初回接続
+    connectSSE();
+  };
+  
+  // SSE接続をクリーンアップ
+  useEffect(() => {
+    return () => {
+      if (sseConnection) {
+        sseConnection.close();
+      }
+    };
+  }, [sseConnection]);
+  
+  // リアルタイムモードで会話が追加されたら自動スクロール
+  useEffect(() => {
+    if (isRealTimeMode && realtimeConversations.length > 0) {
+      logScrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [realtimeConversations, isRealTimeMode]);
 
   // エージェントログを取得する関数
   const fetchAgentLogs = async (jobId: string) => {
@@ -347,6 +465,16 @@ export default function ChatPage() {
                   console.log(`📝 更新後のジョブリスト:`, updated);
                   return updated.slice(0, 10); // 最新10件まで保持
                 });
+                
+                // リアルタイムモードの場合、自動的にモーダルを開いてSSE接続を開始
+                if (isRealTimeMode) {
+                  console.log(`🔴 エージェントネットワークジョブ検出 - モーダルを開いてSSE接続を開始`);
+                  // ジョブが作成されるまで少し待つ
+                  setTimeout(() => {
+                    setShowAgentLogs(true); // モーダルを開く
+                    startRealtimeLogStreaming(event.jobId);
+                  }, 500);
+                }
                 break;
                 
               case 'message-complete':
@@ -474,7 +602,12 @@ export default function ChatPage() {
                   <button
                     onClick={() => {
                       if (recentAgentNetworkJobs.length > 0) {
-                        fetchAgentLogs(recentAgentNetworkJobs[0]);
+                        const jobId = recentAgentNetworkJobs[0];
+                        if (isRealTimeMode) {
+                          startRealtimeLogStreaming(jobId);
+                        } else {
+                          fetchAgentLogs(jobId);
+                        }
                       }
                     }}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
@@ -485,23 +618,48 @@ export default function ChatPage() {
                 </DialogTrigger>
                 <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
                   <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                      <MessageCircle className="w-5 h-5" />
-                      エージェント間の会話履歴
+                    <DialogTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MessageCircle className="w-5 h-5" />
+                        エージェント間の会話履歴
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setIsRealTimeMode(!isRealTimeMode)}
+                          className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                            isRealTimeMode 
+                              ? 'bg-green-600 text-white hover:bg-green-700' 
+                              : 'bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-400 dark:hover:bg-gray-500'
+                          }`}
+                        >
+                          {isRealTimeMode ? '🔴 リアルタイム' : '📁 履歴'}
+                        </button>
+                        {isRealTimeMode && connectionStatus === 'connected' && (
+                          <span className="flex items-center gap-1 text-sm text-green-600 dark:text-green-400">
+                            <span className="w-2 h-2 bg-green-600 dark:bg-green-400 rounded-full animate-pulse" />
+                            接続中
+                          </span>
+                        )}
+                      </div>
                     </DialogTitle>
                     <DialogDescription>
-                      {currentAgentLogs ? `タスク: ${currentAgentLogs.taskType} | 実行時間: ${currentAgentLogs.executionSummary?.executionTime || 'N/A'}` : 'ログを読み込み中...'}
+                      {isRealTimeMode 
+                        ? `リアルタイムモード - 接続状態: ${connectionStatus}`
+                        : currentAgentLogs 
+                          ? `タスク: ${currentAgentLogs.taskType} | 実行時間: ${currentAgentLogs.executionSummary?.executionTime || 'N/A'}` 
+                          : 'ログを読み込み中...'}
                     </DialogDescription>
                   </DialogHeader>
                   
                   <div className="mt-4 overflow-y-auto max-h-[60vh]">
-                    {loadingAgentLogs ? (
+                    {loadingAgentLogs && !isRealTimeMode ? (
                       <div className="flex items-center justify-center py-8">
                         <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
                       </div>
-                    ) : currentAgentLogs?.conversationHistory ? (
+                    ) : (
                       <div className="space-y-4">
-                        {currentAgentLogs.conversationHistory.map((entry, index) => (
+                        {/* リアルタイムモードまたは履歴モードの会話を表示 */}
+                        {(isRealTimeMode ? realtimeConversations : currentAgentLogs?.conversationHistory || []).map((entry, index) => (
                           <div key={index} className="border-l-2 border-gray-200 dark:border-gray-700 pl-4">
                             <div className="flex items-start gap-3">
                               <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold ${
@@ -521,22 +679,50 @@ export default function ChatPage() {
                                   <span className="text-xs text-gray-500 dark:text-gray-400">
                                     イテレーション {entry.iteration}
                                   </span>
+                                  {entry.messageType && (
+                                    <span className={`text-xs px-2 py-0.5 rounded ${
+                                      entry.messageType === 'request' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' :
+                                      entry.messageType === 'response' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' :
+                                      'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                                    }`}>
+                                      {entry.messageType}
+                                    </span>
+                                  )}
                                 </div>
                                 <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
                                   {entry.message}
                                 </p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                  {new Date(entry.timestamp).toLocaleTimeString('ja-JP')}
-                                </p>
+                                <div className="flex items-center gap-3 mt-1">
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {new Date(entry.timestamp).toLocaleTimeString('ja-JP')}
+                                  </p>
+                                  {entry.metadata?.model && (
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      モデル: {entry.metadata.model}
+                                    </span>
+                                  )}
+                                  {entry.metadata?.tools && entry.metadata.tools.length > 0 && (
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      ツール: {entry.metadata.tools.join(', ')}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
                         ))}
+                        
+                        {/* データがない場合の表示 */}
+                        {((isRealTimeMode && realtimeConversations.length === 0) || 
+                          (!isRealTimeMode && (!currentAgentLogs?.conversationHistory || currentAgentLogs.conversationHistory.length === 0))) && (
+                          <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                            {isRealTimeMode ? 'リアルタイムログを待機中...' : '会話履歴がありません'}
+                          </p>
+                        )}
+                        
+                        {/* 自動スクロール用の参照 */}
+                        <div ref={logScrollRef} />
                       </div>
-                    ) : (
-                      <p className="text-center text-gray-500 dark:text-gray-400 py-8">
-                        会話履歴がありません
-                      </p>
                     )}
                   </div>
                   
@@ -548,8 +734,15 @@ export default function ChatPage() {
                       </label>
                       <select
                         className="mt-1 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                        onChange={(e) => fetchAgentLogs(e.target.value)}
-                        value={currentAgentLogs?.jobId || ''}
+                        onChange={(e) => {
+                          const selectedJobId = e.target.value;
+                          if (isRealTimeMode) {
+                            startRealtimeLogStreaming(selectedJobId);
+                          } else {
+                            fetchAgentLogs(selectedJobId);
+                          }
+                        }}
+                        value={currentAgentLogs?.jobId || recentAgentNetworkJobs[0] || ''}
                       >
                         {recentAgentNetworkJobs.map((jobId) => (
                           <option key={jobId} value={jobId}>

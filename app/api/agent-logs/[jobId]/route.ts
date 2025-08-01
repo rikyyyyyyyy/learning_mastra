@@ -27,14 +27,37 @@ export async function GET(
     // エージェント会話履歴を抽出
     const conversationHistory = jobResult.result?.conversationHistory || [];
     
+    // 会話ログの統計情報を計算
+    const conversationStats = {
+      totalMessages: conversationHistory.length,
+      messagesByAgent: conversationHistory.reduce((acc: Record<string, number>, entry: { agentId: string }) => {
+        acc[entry.agentId] = (acc[entry.agentId] || 0) + 1;
+        return acc;
+      }, {}),
+      messagesByType: conversationHistory.reduce((acc: Record<string, number>, entry: { messageType?: string }) => {
+        const type = entry.messageType || 'unknown';
+        acc[type] = (acc[type] || 0) + 1;
+        return acc;
+      }, {}),
+      totalIterations: conversationHistory.length > 0 ? 
+        Math.max(...conversationHistory.map((entry: { iteration?: number }) => entry.iteration || 0)) : 0,
+    };
+    
     // ジョブメタデータも含める
     const response = {
       jobId,
       taskType: jobResult.result?.taskType || 'unknown',
       success: jobResult.result?.success || false,
       conversationHistory,
+      conversationStats,
       executionSummary: jobResult.result?.executionSummary || null,
       timestamp: jobResult.createdAt || new Date().toISOString(),
+      // デバッグ情報（環境変数が設定されている場合）
+      debug: process.env.AGENT_NETWORK_DEBUG === 'true' ? {
+        rawResult: jobResult.result,
+        fileSize: jobResultData.length,
+        filePath: jobResultPath,
+      } : undefined,
     };
     
     return NextResponse.json(response);

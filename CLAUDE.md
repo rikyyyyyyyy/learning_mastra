@@ -17,7 +17,7 @@ This project supports both npm and pnpm. All dependencies are managed through `p
 
 ## Architecture Overview
 
-This is a **Mastra-based AI Assistant** built with Next.js that provides web search, weather information, and slide generation capabilities through an asynchronous job system.
+This is a **Mastra-based AI Assistant** built with Next.js that provides web search, weather information, and slide generation capabilities through an asynchronous job system with hierarchical agent networks.
 
 ### Core Architecture Patterns
 
@@ -26,18 +26,25 @@ This is a **Mastra-based AI Assistant** built with Next.js that provides web sea
    - **Tools** (`/src/mastra/tools/`): Return job IDs immediately (< 100ms) for async operations
    - **Workflows** (`/src/mastra/workflows/`): Background processes that execute the actual work
 
-2. **Job-Based Async System**
+2. **Hierarchical Agent Network**
+   - **General Agent**: Main entry point that can delegate to specialized agents
+   - **CEO Agent**: High-level task planning and delegation
+   - **Manager Agent**: Task breakdown and worker coordination
+   - **Worker Agent**: Specific task execution (code, research, etc.)
+
+3. **Job-Based Async System**
    - All long-running operations return job IDs immediately
    - Jobs transition through states: queued → running → completed/failed
    - Results are fetched via job ID when ready
    - Job results stored in `.job-results` directory
+   - Real-time status updates via Server-Sent Events (SSE)
 
-3. **Memory Management**
+4. **Memory Management**
    - Thread-based conversation memory using LibSQL (in-memory by default)
    - User isolation for security
    - Shared memory between agents within a thread
 
-4. **Authentication System**
+5. **Authentication System**
    - Supabase authentication with middleware session management
    - Protected routes under `/protected/*`
    - Complete auth flow (login, signup, forgot password, email confirmation)
@@ -47,11 +54,12 @@ This is a **Mastra-based AI Assistant** built with Next.js that provides web sea
 **Main Entry Points:**
 - `/app/api/chat/route.ts`: Primary chat endpoint using general-agent
 - `/app/api/job-result/[jobId]/route.ts`: Job result retrieval endpoint
+- `/app/api/agent-logs/[jobId]/route.ts`: Agent conversation log retrieval
+- `/app/api/agent-logs/stream/route.ts`: Real-time agent conversation streaming
 
 **Mastra Configuration:**
 - `/src/mastra/index.ts`: Central Mastra instance configuration
-- Integrates OpenAI (GPT-4o Search Preview), Anthropic (Claude Sonnet 4), and Google AI models
-- MCP (Model Context Protocol) support for Brave search
+- Integrates OpenAI (o3), Anthropic (Claude Sonnet 4), and Google AI (Gemini 2.5 Flash) models
 - Configures agents, tools, workflows, and memory
 
 **Agent Implementation Pattern:**
@@ -61,6 +69,7 @@ All agents follow this structure:
 - Share thread memory
 - Return streaming responses
 - Japanese language instructions by default
+- Log conversations to `.agent-network-logs` directory
 
 **Tool Implementation Pattern:**
 Tools must:
@@ -91,8 +100,8 @@ GOOGLE_GENERATIVE_AI_API_KEY=your_key
 NEXT_PUBLIC_SUPABASE_URL=your_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_key
 
-# Brave Search (MCP)
-BRAVE_API_KEY=your_key
+# Search APIs (optional)
+EXA_API_KEY=your_key
 ```
 
 ### Testing Approach
@@ -126,6 +135,12 @@ Uses **shadcn/ui** with New York style theme and Lucide icons. When adding compo
 4. Create corresponding tool to trigger it
 5. Implement progress tracking
 
+**Adding a new agent:**
+1. Create agent file in `/src/mastra/agents/`
+2. Define instructions, model, and available tools
+3. Register in `/src/mastra/index.ts`
+4. Consider adding to agent network hierarchy if applicable
+
 **Modifying chat behavior:**
 1. Primary logic is in `/src/mastra/agents/general-agent.ts`
 2. Chat UI is in `/app/protected/chat/page.tsx`
@@ -134,8 +149,9 @@ Uses **shadcn/ui** with New York style theme and Lucide icons. When adding compo
 
 ### Important Implementation Notes
 
-- **GPT-4o Search Preview** doesn't support temperature parameter
-- **Slide preview tool** must be called after slide generation for HTML preview
-- **MCP tools** are wrapped as Mastra tools for consistency
-- **Logging** uses PinoLogger for structured output
-- **TypeScript** strict mode is enabled with path alias `@/*`
+- **Model Selection**: Chat UI allows dynamic model selection between Claude, OpenAI, and Gemini
+- **Agent Network**: Uses `agent-network-tool` to delegate complex tasks to specialized agents
+- **Logging**: Agent conversations logged to `.agent-network-logs` with timestamp-based filenames
+- **SSE Support**: Real-time streaming for agent conversations and job status updates
+- **TypeScript**: Strict mode enabled with path alias `@/*`
+- **Error Handling**: All tools and workflows must implement proper error boundaries

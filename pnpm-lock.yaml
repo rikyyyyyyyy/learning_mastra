@@ -123,6 +123,12 @@ importers:
       eslint-config-next:
         specifier: 15.3.1
         version: 15.3.1(eslint@9.30.1(jiti@1.21.7))(typescript@5.8.3)
+      eventsource:
+        specifier: ^4.0.0
+        version: 4.0.0
+      node-fetch:
+        specifier: ^2.7.0
+        version: 2.7.0
       postcss:
         specifier: ^8
         version: 8.5.6
@@ -2749,6 +2755,10 @@ packages:
   eventsource@3.0.7:
     resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
     engines: {node: '>=18.0.0'}
+
+  eventsource@4.0.0:
+    resolution: {integrity: sha512-fvIkb9qZzdMxgZrEQDyll+9oJsyaVvY92I2Re+qK0qEJ+w5s0X3dtz+M0VAPOjP1gtU3iqWyjQ0G3nvd5CLZ2g==}
+    engines: {node: '>=20.0.0'}
 
   exit-hook@4.0.0:
     resolution: {integrity: sha512-Fqs7ChZm72y40wKjOFXBKg7nJZvQJmewP5/7LtePDdnah/+FH9Hp5sgMujSCMPXlxOAW2//1jrW9pnsY7o20vQ==}
@@ -7782,6 +7792,10 @@ snapshots:
   eventsource-parser@3.0.3: {}
 
   eventsource@3.0.7:
+    dependencies:
+      eventsource-parser: 3.0.3
+
+  eventsource@4.0.0:
     dependencies:
       eventsource-parser: 3.0.3
 

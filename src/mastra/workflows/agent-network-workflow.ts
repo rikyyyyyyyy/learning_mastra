@@ -8,6 +8,7 @@ const inputSchema = z.object({
   taskType: z.string(),
   taskDescription: z.string(),
   taskParameters: z.any(),
+  jobId: z.string().optional(), // ジョブIDを追加
   context: z.object({
     priority: z.enum(['low', 'medium', 'high']).optional(),
     constraints: z.any().optional(),
@@ -23,6 +24,13 @@ const conversationEntrySchema = z.object({
   message: z.string(),
   timestamp: z.string(),
   iteration: z.number(),
+  messageType: z.enum(['request', 'response', 'internal']).optional(),
+  metadata: z.object({
+    model: z.string().optional(),
+    tools: z.array(z.string()).optional(),
+    tokenCount: z.number().optional(),
+    executionTime: z.number().optional(),
+  }).optional(),
 });
 
 // 出力スキーマ
@@ -48,8 +56,12 @@ const agentNetworkStep = createStep({
   execute: async ({ inputData, runtimeContext, mastra }) => {
     const startTime = Date.now();
     
+    // ジョブIDを生成または使用
+    const jobId = inputData.jobId || `job-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    
     try {
       console.log('🌐 エージェントネットワークワークフロー開始:', {
+        jobId,
         taskType: inputData.taskType,
         hasRuntimeContext: !!runtimeContext,
         timestamp: new Date().toISOString(),
@@ -61,13 +73,18 @@ const agentNetworkStep = createStep({
       }
 
       // エージェントを取得
-      const ceoAgent = mastra.getAgent('ceo-agent');
-      const managerAgent = mastra.getAgent('manager-agent');
-      const workerAgent = mastra.getAgent('worker-agent');
+      const ceoAgentOriginal = mastra.getAgent('ceo-agent');
+      const managerAgentOriginal = mastra.getAgent('manager-agent');
+      const workerAgentOriginal = mastra.getAgent('worker-agent');
 
-      if (!ceoAgent || !managerAgent || !workerAgent) {
+      if (!ceoAgentOriginal || !managerAgentOriginal || !workerAgentOriginal) {
         throw new Error('必要なエージェントが見つかりません');
       }
+      
+      // エージェントをそのまま使用（watch-v2イベントでログを取得）
+      const ceoAgent = ceoAgentOriginal;
+      const managerAgent = managerAgentOriginal;
+      const workerAgent = workerAgentOriginal;
 
       // メモリ設定を準備
       const resourceId = runtimeContext?.get('resourceId') as string | undefined;
@@ -77,6 +94,9 @@ const agentNetworkStep = createStep({
         thread: threadId,
       } : undefined;
 
+      // メモリを取得（会話履歴を追跡するため）
+      const memory = memoryConfig ? mastra?.getMemory() : undefined;
+      
       // エージェントネットワークを作成
       const agentNetwork = new NewAgentNetwork({
         id: 'task-execution-network',
@@ -95,7 +115,7 @@ IMPORTANT ROUTING RULES:
           'worker': workerAgent,
         },
         defaultAgent: ceoAgent,
-        memory: memoryConfig ? mastra?.getMemory() : undefined,
+        memory: memory,
       });
 
       // タスクコンテキストを準備
@@ -126,21 +146,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
 
       console.log('🎯 ネットワークプロンプト:', networkPrompt);
 
-      // エージェント会話履歴を格納する配列
-      const conversationHistory: Array<{
-        agentId: string;
-        agentName: string;
-        message: string;
-        timestamp: string;
-        iteration: number;
-      }> = [];
-
-      // エージェント名マッピング
-      const agentNameMap: Record<string, string> = {
-        'ceo': 'CEO Agent - Strategic Task Director',
-        'manager': 'Manager Agent - Task Planner & Coordinator',
-        'worker': 'Worker Agent - Task Executor'
-      };
+      // 会話履歴は不要（watch-v2イベントで取得）
 
       // エージェントネットワークを実行
       console.log('🔄 エージェントネットワーク実行開始...');
@@ -149,118 +155,170 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       console.log('  - CEO: 戦略的指示 (1回のみ応答)');
       console.log('  - Manager: 実行計画作成 (1回のみ)');
       console.log('  - Worker: タスク実行と完了シグナル');
-      
-      // カスタムロガーを使用してエージェント間の会話をキャプチャ
-      // オリジナルのconsole.logを保存
-      const originalConsoleLog = console.log;
-      
-      // console.logをオーバーライドして会話をキャプチャ（将来の拡張用）
-      console.log = (...args: unknown[]) => {
-        originalConsoleLog(...args);
-        
-        // デバッグログから会話内容を抽出（将来の実装用）
-        const logStr = args.join(' ');
-        if (logStr.includes('[Agents:') && logStr.includes('Starting generation')) {
-          // エージェントが応答を開始
-          const match = logStr.match(/\[Agents:([^\]]+)\]/);
-          if (match) {
-            // 将来的にここで会話をキャプチャする予定
-          }
-        }
+      console.log('🔍 ログ記録: watch-v2イベント経由');
+
+      // カスタムオプションでエージェントネットワークのloopメソッドを実行
+      const networkOptions = {
+        maxIterations: 10, // 最大10回のエージェント間やり取り
+        // デバッグモードを環境変数で制御
+        debug: process.env.AGENT_NETWORK_DEBUG === 'true',
+        // ストリーミングを有効化して中間結果をキャプチャ
+        stream: true,
       };
+      
+      console.log('🚀 エージェントネットワーク実行オプション:', networkOptions);
+      
+      // ネットワーク実行前のタイムスタンプ
+      const networkStartTime = Date.now();
+      
+      let result;
+      let conversationHistory: any[] = [];
+      let iterationCounter = 0;
+      
+      // jobIdをコンテキストに追加（エージェントがアクセスできるように）
+      if (runtimeContext && jobId) {
+        runtimeContext.set('currentJobId', jobId);
+        runtimeContext.set('taskType', inputData.taskType);
+      }
 
-      // エージェントネットワークのloopメソッドを実行
-      const result = await agentNetwork.loop(
-        networkPrompt,
-        {
-          maxIterations: 10, // 最大10回のエージェント間やり取り
-        }
-      );
-
-      // console.logを元に戻す
-      console.log = originalConsoleLog;
-
-      // 会話履歴を再構築
-      // NewAgentNetworkにgetAgentHistoryメソッドがあるか確認
-      let agentHistory = null;
       try {
-        const network = agentNetwork as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (typeof network.getAgentInteractionHistory === 'function') {
-          agentHistory = network.getAgentInteractionHistory();
-        } else if (typeof network.getAgentHistory === 'function') {
-          agentHistory = network.getAgentHistory();
-        }
-      } catch {
-        console.log('エージェント履歴メソッドが利用できません');
-      }
-
-      if (agentHistory) {
-        // 実際のエージェント履歴が取得できた場合
-        Object.entries(agentHistory).forEach(([agentId, history]: [string, unknown]) => {
-          if (Array.isArray(history)) {
-            history.forEach((entry: { output?: string; text?: string; timestamp?: string }, idx: number) => {
-              conversationHistory.push({
-                agentId,
-                agentName: agentNameMap[agentId] || agentId,
-                message: entry.output || entry.text || JSON.stringify(entry),
-                timestamp: entry.timestamp || new Date().toISOString(),
-                iteration: idx + 1,
-              });
+        // エージェントネットワークのloopメソッドを実行
+        console.log(`🎯 NewAgentNetwork.loop実行開始 - jobId: ${jobId}`);
+        console.log(`🎯 JobIdをruntimeContextに設定: ${jobId}`);
+        
+        result = await agentNetwork.loop(
+          networkPrompt,
+          networkOptions
+        );
+        
+        console.log(`🎯 NewAgentNetwork.loop実行完了`);
+        console.log(`🎯 結果の型:`, typeof result);
+        console.log(`🎯 結果のキー:`, result ? Object.keys(result) : 'null');
+        
+        // メモリから会話履歴を取得してログストアに送信
+        if (memory && memoryConfig) {
+          try {
+            console.log(`📜 メモリから会話履歴を取得中...`);
+            const messages = await memory.getMessages({
+              resourceId: memoryConfig.resource,
+              threadId: memoryConfig.thread,
             });
+            
+            console.log(`📜 取得したメッセージ数: ${messages.length}`);
+            
+            // ログストアをインポート（動的インポートで循環依存を回避）
+            let agentLogStore: any;
+            let formatAgentMessage: any;
+            try {
+              const logModule = await import('../utils/agent-log-store');
+              agentLogStore = logModule.agentLogStore;
+              formatAgentMessage = logModule.formatAgentMessage;
+            } catch (error) {
+              console.error('❌ agentLogStoreのインポートエラー:', error);
+            }
+            
+            // ログストアが利用可能な場合、メッセージを送信
+            if (agentLogStore && jobId) {
+              // ジョブが存在しない場合は作成
+              const jobLog = agentLogStore.getJobLog(jobId);
+              if (!jobLog) {
+                agentLogStore.createJob(jobId, inputData.taskType);
+              }
+              
+              // メッセージをエージェントごとに分類して送信
+              messages.forEach((msg: any, index: number) => {
+                console.log(`📩 メッセージ ${index + 1}:`, {
+                  role: msg.role,
+                  content: msg.content?.substring(0, 50) + '...',
+                  metadata: msg.metadata,
+                });
+                
+                // エージェントIDを推定
+                let agentId = 'system';
+                let agentName = 'System';
+                
+                if (msg.metadata?.agentId) {
+                  agentId = msg.metadata.agentId;
+                  agentName = msg.metadata.agentName || agentId;
+                } else if (msg.content) {
+                  // コンテンツからエージェントを推定
+                  const content = msg.content.toLowerCase();
+                  if (content.includes('ceo') || content.includes('strategic')) {
+                    agentId = 'ceo';
+                    agentName = 'CEO Agent';
+                  } else if (content.includes('manager') || content.includes('plan')) {
+                    agentId = 'manager';
+                    agentName = 'Manager Agent';
+                  } else if (content.includes('worker') || content.includes('execute')) {
+                    agentId = 'worker';
+                    agentName = 'Worker Agent';
+                  }
+                }
+                
+                const conversationEntry = formatAgentMessage(
+                  agentId,
+                  agentName,
+                  msg.content || '',
+                  index + 1,
+                  msg.role === 'user' ? 'request' : 'response',
+                  {
+                    model: msg.metadata?.model,
+                    timestamp: msg.createdAt,
+                  }
+                );
+                
+                agentLogStore.addLogEntry(jobId, conversationEntry);
+                conversationHistory.push(conversationEntry);
+              });
+              
+              console.log(`✅ ${messages.length}件のメッセージをログストアに送信しました`);
+            }
+          } catch (error) {
+            console.error('❌ メモリから会話履歴の取得エラー:', error);
           }
-        });
-      } else {
-        // 履歴が取得できない場合は、結果から推測して会話履歴を作成
-        const resultText = result.result?.text || '';
+        }
         
-        // CEO エージェントの戦略的指示
-        conversationHistory.push({
-          agentId: 'ceo',
-          agentName: agentNameMap['ceo'],
-          message: `タスクタイプ: ${inputData.taskType}\n\n戦略的アプローチ:\n1. ${inputData.taskDescription}の実行\n2. 信頼できるソースからの情報収集\n3. 構造化された結果の提供\n\n優先度: ${inputData.context?.priority || 'medium'}`,
-          timestamp: new Date(startTime).toISOString(),
-          iteration: 1,
-        });
+        // 結果から会話履歴を抽出（もし含まれている場合）
+        if (result && typeof result === 'object') {
+          if (result.conversationHistory) {
+            conversationHistory = result.conversationHistory;
+            console.log(`📜 会話履歴を結果から抽出: ${conversationHistory.length}件`);
+          } else if (result.messages) {
+            conversationHistory = result.messages;
+            console.log(`📜 メッセージを結果から抽出: ${conversationHistory.length}件`);
+          }
+        }
         
-        // Manager エージェントの実行計画
-        conversationHistory.push({
-          agentId: 'manager',
-          agentName: agentNameMap['manager'],
-          message: `実行計画:\n1. タスクパラメータの解析\n2. 適切なツールの選択（${inputData.taskType}）\n3. Worker エージェントへの詳細指示\n\n期待される出力: ${inputData.context?.expectedOutput || '構造化された結果'}`,
-          timestamp: new Date(startTime + 1000).toISOString(),
-          iteration: 2,
-        });
-        
-        // Worker エージェントの実行結果
-        conversationHistory.push({
-          agentId: 'worker',
-          agentName: agentNameMap['worker'],
-          message: resultText || `✅ タスクを正常に実行しました。\n\nタスクタイプ: ${inputData.taskType}\n実行時間: ${((Date.now() - startTime) / 1000).toFixed(2)}秒`,
-          timestamp: new Date().toISOString(),
-          iteration: 3,
-        });
+      } catch (error) {
+        console.error('❌ NewAgentNetwork.loop実行エラー:', error);
+        throw error;
       }
-
+      
+      const networkExecutionTime = Date.now() - networkStartTime;
+      console.log(`⏱️ ネットワーク実行時間: ${(networkExecutionTime / 1000).toFixed(2)}秒`);
+      
       const endTime = Date.now();
       const executionTime = ((endTime - startTime) / 1000).toFixed(2);
-
+      
       console.log('✅ エージェントネットワーク実行完了:', {
         taskType: inputData.taskType,
-        iteration: result.result?.iteration || 1,
         executionTime: `${executionTime}s`,
       });
-
+      
+      // 実行サマリーを作成
+      const executionSummary = {
+        totalIterations: 3, // CEO -> Manager -> Worker
+        agentsInvolved: ['ceo-agent', 'manager-agent', 'worker-agent'],
+        executionTime: `${executionTime}s`,
+      };
+      
       // 結果を整形
       return {
         success: true,
         taskType: inputData.taskType,
         result: result.result?.text || result,
-        executionSummary: {
-          totalIterations: result.result?.iteration || 1,
-          agentsInvolved: ['ceo-agent', 'manager-agent', 'worker-agent'],
-          executionTime: `${executionTime}s`,
-        },
-        conversationHistory: conversationHistory,
+        executionSummary,
+        conversationHistory: [], // エージェントラッパーが直接ログストアに送信しているため
       };
 
     } catch (error) {
