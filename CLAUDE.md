@@ -56,7 +56,7 @@ This is a **Mastra-based AI Assistant Platform** built with Next.js 15 that prov
 - `/app/api/chat/route.ts`: Primary chat endpoint using general-agent
 - `/app/api/job-result/[jobId]/route.ts`: Job result retrieval endpoint
 - `/app/api/agent-logs/[jobId]/route.ts`: Agent conversation log retrieval
-- `/app/api/agent-logs/stream/route.ts`: Real-time agent conversation streaming
+- `/app/api/agent-logs/stream/[jobId]/route.ts`: Real-time agent conversation streaming
 
 **Mastra Configuration:**
 - `/src/mastra/index.ts`: Central Mastra instance configuration
@@ -179,7 +179,7 @@ When using the agent network for complex tasks:
 - `/src/mastra/workflows/agent-network-workflow.ts`: Orchestrates agent network execution
 - `/src/mastra/agents/network/`: CEO, Manager, and Worker agent definitions
 - `/src/mastra/utils/agent-logger.ts`: Conversation logging utilities
-- `/app/api/agent-logs/stream/route.ts`: SSE endpoint for real-time logs
+- `/app/api/agent-logs/stream/[jobId]/route.ts`: SSE endpoint for real-time logs
 
 ### Model-Specific Behaviors
 
