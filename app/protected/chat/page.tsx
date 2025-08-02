@@ -709,7 +709,7 @@ export default function ChatPage() {
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 shadow-sm">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900 dark:to-purple-800 rounded-lg">
               <Bot className="w-6 h-6 text-purple-700 dark:text-purple-300" />
@@ -1023,7 +1023,7 @@ export default function ChatPage() {
 
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto py-8 px-4">
+        <div className="py-8 px-6 md:px-12 lg:px-16">
           {messages.map((message) => (
             <div
               key={message.id}
@@ -1093,8 +1093,8 @@ export default function ChatPage() {
       </div>
 
       {/* Input Area */}
-      <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-4 py-4 shadow-lg">
-        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
+      <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 md:px-12 lg:px-16 py-4 shadow-lg">
+        <form onSubmit={handleSubmit}>
           <div className="flex gap-3">
             <textarea
               ref={inputRef}
