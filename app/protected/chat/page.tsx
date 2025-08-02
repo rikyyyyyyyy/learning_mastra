@@ -479,10 +479,6 @@ export default function ChatPage() {
     }
   };
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
   // 新しい会話を開始する関数
   const startNewConversation = () => {
     // 新しいthreadIdを生成
@@ -534,6 +530,11 @@ export default function ChatPage() {
     };
 
     setMessages((prev) => [...prev, assistantMessage]);
+    
+    // ユーザーがメッセージを送信した時のみスクロール
+    setTimeout(() => {
+      scrollToBottom();
+    }, 100); // DOMの更新を待つため少し遅延
 
     try {
       const response = await fetch("/api/chat", {
@@ -661,9 +662,6 @@ export default function ChatPage() {
             console.error('❌ 問題のある行:', line);
           }
         }
-        
-        // Scroll to bottom during streaming
-        scrollToBottom();
       }
       
       // 残りのバッファを処理
