@@ -155,3 +155,39 @@ Uses **shadcn/ui** with New York style theme and Lucide icons. When adding compo
 - **SSE Support**: Real-time streaming for agent conversations and job status updates
 - **TypeScript**: Strict mode enabled with path alias `@/*`
 - **Error Handling**: All tools and workflows must implement proper error boundaries
+
+### Agent Network Execution Flow
+
+When using the agent network for complex tasks:
+
+1. **Task Initiation**: General Agent analyzes request and uses `agentNetworkTool`
+2. **Job Creation**: Tool returns job ID immediately while workflow starts in background
+3. **Workflow Execution**: `agent-network-workflow` creates `NewAgentNetwork` instance
+4. **Agent Coordination**: CEO → Manager → Worker agents collaborate (max 10 iterations)
+5. **Result Storage**: Final results saved to `.job-results/[jobId].json`
+6. **Status Tracking**: Use `jobStatusTool` and `jobResultTool` to monitor/retrieve results
+
+### Key Files for Agent Network
+
+- `/src/mastra/tools/agent-network-tool.ts`: Entry point for delegating tasks
+- `/src/mastra/workflows/agent-network-workflow.ts`: Orchestrates agent network execution
+- `/src/mastra/agents/network/`: CEO, Manager, and Worker agent definitions
+- `/src/mastra/utils/agent-logger.ts`: Conversation logging utilities
+- `/app/api/agent-logs/stream/route.ts`: SSE endpoint for real-time logs
+
+### Model-Specific Behaviors
+
+**Claude Sonnet 4** (default):
+- Best for complex reasoning and Japanese language tasks
+- Used by all network agents (CEO, Manager, Worker)
+- Model ID: `claude-sonnet-4-20250514`
+
+**OpenAI o3**:
+- High-performance reasoning model
+- Model ID: `o3-2025-04-16`
+- Available in chat UI model selector
+
+**Gemini 2.5 Flash**:
+- Fast responses with visible thinking process
+- Model ID: `gemini-2.5-flash`
+- Cost-effective for simple tasks

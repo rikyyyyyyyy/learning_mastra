@@ -60,9 +60,56 @@ export async function GET(
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
+      let isStreamClosed = false;
+      let heartbeatInterval: NodeJS.Timeout | null = null;
+      
+      // ストリームが閉じられているかチェックして安全にenqueueする
+      const safeEnqueue = (data: Uint8Array): boolean => {
+        if (isStreamClosed) {
+          console.log('⚠️ Stream already closed, skipping enqueue');
+          return false;
+        }
+        try {
+          controller.enqueue(data);
+          return true;
+        } catch (error) {
+          console.error(`❌ Enqueue failed: ${error}`);
+          isStreamClosed = true;
+          return false;
+        }
+      };
+      
+      // ストリームを安全に閉じる
+      const closeStream = () => {
+        if (isStreamClosed) {
+          console.log('⚠️ Stream already closed');
+          return;
+        }
+        
+        isStreamClosed = true;
+        
+        // ハートビートを停止
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+          heartbeatInterval = null;
+        }
+        
+        // イベントリスナーを削除
+        agentLogStore.off('log-added', handleLogAdded);
+        agentLogStore.off('job-completed', handleJobCompleted);
+        agentLogStore.off('job-failed', handleJobFailed);
+        
+        // コントローラーを閉じる
+        try {
+          controller.close();
+          console.log(`✅ Stream closed successfully for job: ${jobId}`);
+        } catch (error) {
+          console.log(`⚠️ Controller already closed: ${error}`);
+        }
+      };
       
       // 接続確立メッセージを送信
-      controller.enqueue(
+      safeEnqueue(
         encoder.encode(formatSSEMessage('connected', {
           jobId,
           taskType: jobLog.taskType,
@@ -73,7 +120,7 @@ export async function GET(
       
       // 既存の会話履歴を送信
       if (jobLog.conversationHistory.length > 0) {
-        controller.enqueue(
+        safeEnqueue(
           encoder.encode(formatSSEMessage('history', {
             conversationHistory: jobLog.conversationHistory,
             count: jobLog.conversationHistory.length,
@@ -84,62 +131,50 @@ export async function GET(
       // リアルタイムログのリスナーを設定
       const handleLogAdded = (logJobId: string, entry: AgentConversationEntry) => {
         console.log(`📤 [SSE] ログイベント受信: jobId=${logJobId}, target=${jobId}, match=${logJobId === jobId}`);
-        if (logJobId === jobId) {
-          try {
-            const message = formatSSEMessage('log-entry', {
-              jobId,
-              entry,
-              timestamp: new Date().toISOString(),
-            });
-            console.log(`📤 [SSE] ログエントリ送信: ${entry.agentName} - ${entry.message.substring(0, 50)}...`);
-            controller.enqueue(encoder.encode(message));
-          } catch (error) {
-            console.error(`❌ SSEエンキューエラー: ${error}`);
-          }
+        if (logJobId === jobId && !isStreamClosed) {
+          const message = formatSSEMessage('log-entry', {
+            jobId,
+            entry,
+            timestamp: new Date().toISOString(),
+          });
+          console.log(`📤 [SSE] ログエントリ送信: ${entry.agentName} - ${entry.message.substring(0, 50)}...`);
+          safeEnqueue(encoder.encode(message));
         }
       };
       
       // ジョブ完了のリスナー
       const handleJobCompleted = (completedJobId: string) => {
-        if (completedJobId === jobId) {
+        if (completedJobId === jobId && !isStreamClosed) {
           const finalLog = agentLogStore.getJobLog(jobId);
-          try {
-            controller.enqueue(
-              encoder.encode(formatSSEMessage('job-completed', {
-                jobId,
-                executionSummary: finalLog?.executionSummary,
-                totalMessages: finalLog?.conversationHistory.length || 0,
-                endTime: finalLog?.endTime,
-              }))
-            );
-            // 完了後、接続を閉じる
-            setTimeout(() => {
-              controller.close();
-            }, 1000);
-          } catch (error) {
-            console.error(`❌ SSE完了エラー: ${error}`);
-          }
+          safeEnqueue(
+            encoder.encode(formatSSEMessage('job-completed', {
+              jobId,
+              executionSummary: finalLog?.executionSummary,
+              totalMessages: finalLog?.conversationHistory.length || 0,
+              endTime: finalLog?.endTime,
+            }))
+          );
+          // 完了メッセージ送信後、少し待ってから接続を閉じる
+          setTimeout(() => {
+            closeStream();
+          }, 1000);
         }
       };
       
       // ジョブ失敗のリスナー
       const handleJobFailed = (failedJobId: string, error: string) => {
-        if (failedJobId === jobId) {
-          try {
-            controller.enqueue(
-              encoder.encode(formatSSEMessage('job-failed', {
-                jobId,
-                error,
-                timestamp: new Date().toISOString(),
-              }))
-            );
-            // 失敗後、接続を閉じる
-            setTimeout(() => {
-              controller.close();
-            }, 1000);
-          } catch (error) {
-            console.error(`❌ SSE失敗エラー: ${error}`);
-          }
+        if (failedJobId === jobId && !isStreamClosed) {
+          safeEnqueue(
+            encoder.encode(formatSSEMessage('job-failed', {
+              jobId,
+              error,
+              timestamp: new Date().toISOString(),
+            }))
+          );
+          // 失敗メッセージ送信後、少し待ってから接続を閉じる
+          setTimeout(() => {
+            closeStream();
+          }, 1000);
         }
       };
       
@@ -149,49 +184,39 @@ export async function GET(
       agentLogStore.on('job-failed', handleJobFailed);
       
       // ハートビートを送信（30秒ごと）
-      const heartbeatInterval = setInterval(() => {
-        try {
-          controller.enqueue(
+      heartbeatInterval = setInterval(() => {
+        if (!isStreamClosed) {
+          const heartbeatSuccess = safeEnqueue(
             encoder.encode(formatSSEMessage('heartbeat', {
               timestamp: new Date().toISOString(),
               jobId,
             }))
           );
-        } catch (error) {
-          console.error(`❌ ハートビートエラー: ${error}`);
-          clearInterval(heartbeatInterval);
+          if (!heartbeatSuccess && heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = null;
+          }
         }
       }, 30000);
       
       // クリーンアップ処理
       request.signal.addEventListener('abort', () => {
         console.log(`🔌 SSE接続終了: ${jobId}`);
-        agentLogStore.off('log-added', handleLogAdded);
-        agentLogStore.off('job-completed', handleJobCompleted);
-        agentLogStore.off('job-failed', handleJobFailed);
-        clearInterval(heartbeatInterval);
-        
-        try {
-          controller.close();
-        } catch (error) {
-          // Already closed
-        }
+        closeStream();
       });
       
       // ジョブが既に完了している場合
       if (jobLog.status !== 'running') {
         setTimeout(() => {
-          try {
-            controller.enqueue(
+          if (!isStreamClosed) {
+            safeEnqueue(
               encoder.encode(formatSSEMessage('job-already-completed', {
                 jobId,
                 status: jobLog.status,
                 endTime: jobLog.endTime,
               }))
             );
-            controller.close();
-          } catch (error) {
-            console.error(`❌ SSE既完了エラー: ${error}`);
+            closeStream();
           }
         }, 100);
       }
