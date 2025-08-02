@@ -17,7 +17,7 @@ This project supports both npm and pnpm. All dependencies are managed through `p
 
 ## Architecture Overview
 
-This is a **Mastra-based AI Assistant** built with Next.js that provides web search, weather information, and slide generation capabilities through an asynchronous job system with hierarchical agent networks.
+This is a **Mastra-based AI Assistant Platform** built with Next.js 15 that provides web search, weather information, and slide generation capabilities through an asynchronous job system with hierarchical agent networks. The platform features a sophisticated CEO-Manager-Worker agent pattern for complex task automation.
 
 ### Core Architecture Patterns
 
@@ -28,9 +28,10 @@ This is a **Mastra-based AI Assistant** built with Next.js that provides web sea
 
 2. **Hierarchical Agent Network**
    - **General Agent**: Main entry point that can delegate to specialized agents
-   - **CEO Agent**: High-level task planning and delegation
+   - **CEO Agent**: High-level task planning and delegation (responds once per task)
    - **Manager Agent**: Task breakdown and worker coordination
    - **Worker Agent**: Specific task execution (code, research, etc.)
+   - Maximum 10 iterations with automatic routing between agents
 
 3. **Job-Based Async System**
    - All long-running operations return job IDs immediately
@@ -102,6 +103,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_key
 
 # Search APIs (optional)
 EXA_API_KEY=your_key
+
+# Logging (optional)
+LOG_LEVEL=debug
 ```
 
 ### Testing Approach
@@ -155,6 +159,8 @@ Uses **shadcn/ui** with New York style theme and Lucide icons. When adding compo
 - **SSE Support**: Real-time streaming for agent conversations and job status updates
 - **TypeScript**: Strict mode enabled with path alias `@/*`
 - **Error Handling**: All tools and workflows must implement proper error boundaries
+- **Japanese-First Interface**: All UI text and agent instructions default to Japanese
+- **Performance**: Tools must respond within 100ms; use background processing for long operations
 
 ### Agent Network Execution Flow
 
@@ -191,3 +197,33 @@ When using the agent network for complex tasks:
 - Fast responses with visible thinking process
 - Model ID: `gemini-2.5-flash`
 - Cost-effective for simple tasks
+
+### Project Structure
+
+Key directories:
+```
+/app              # Next.js App Router pages and API routes
+  /api            # API endpoints (chat, jobs, agent logs)
+  /protected      # Authenticated pages (chat, dashboard)
+/src
+  /mastra         # Core Mastra configuration
+    /agents       # AI agent definitions
+      /network    # Hierarchical agents (CEO, Manager, Worker)
+    /tools        # Tool implementations (must return < 100ms)
+    /workflows    # Background workflow definitions
+    /utils        # Utility functions (logging, etc.)
+  /components     # React components
+    /ui           # shadcn/ui components
+  /lib            # Shared libraries and utilities
+/components       # Additional UI components
+/.job-results     # Async job results storage
+/.agent-network-logs # Agent conversation logs
+```
+
+### Debugging Tips
+
+- Check `.agent-network-logs` for detailed agent conversations
+- Monitor job status using the job status tool
+- Use SSE endpoint `/api/agent-logs/stream` for real-time agent logs
+- Enable `LOG_LEVEL=debug` for detailed logging
+- Job results are stored in `.job-results/[jobId].json`
