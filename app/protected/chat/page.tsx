@@ -120,6 +120,7 @@ export default function ChatPage() {
   const messageIdCounter = useRef(0);
   const logScrollRef = useRef<HTMLDivElement>(null);
   const connectingJobs = useRef<Set<string>>(new Set());
+  const [isComposing, setIsComposing] = useState(false);
   
   // threadIdを管理（セッション中は同じthreadIdを使用）
   const threadIdRef = useRef<string>(`thread-${Date.now()}`);
@@ -700,7 +701,7 @@ export default function ChatPage() {
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !isComposing) {
       e.preventDefault();
       handleSubmit(e);
     }
@@ -1102,6 +1103,8 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyPress}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
               placeholder="メッセージを入力してください..."
               className="flex-1 resize-none rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-3 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 transition-all duration-200 shadow-sm focus:shadow-md"
               rows={1}
