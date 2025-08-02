@@ -45,6 +45,18 @@ interface AgentLogsData {
   completedAt?: Date;
 }
 
+interface JobData {
+  jobId: string;
+  taskType: string;
+  status: 'running' | 'completed' | 'failed';
+  startTime: Date;
+  endTime?: Date;
+  agentLogs?: AgentLogsData;
+  realtimeConversations: AgentConversation[];
+  sseConnection?: EventSource;
+  connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
+}
+
 type AIModel = "claude-sonnet-4" | "openai-o3" | "gemini-2.5-flash";
 
 interface ModelInfo {
@@ -98,14 +110,11 @@ export default function ChatPage() {
       style?: string;
     };
   } | null>(null);
-  const [recentAgentNetworkJobs, setRecentAgentNetworkJobs] = useState<string[]>([]);
+  const [activeJobs, setActiveJobs] = useState<Map<string, JobData>>(new Map());
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [showAgentLogs, setShowAgentLogs] = useState(false);
-  const [currentAgentLogs, setCurrentAgentLogs] = useState<AgentLogsData | null>(null);
   const [loadingAgentLogs, setLoadingAgentLogs] = useState(false);
   const [isRealTimeMode, setIsRealTimeMode] = useState(true);
-  const [realtimeConversations, setRealtimeConversations] = useState<AgentConversation[]>([]);
-  const [sseConnection, setSseConnection] = useState<EventSource | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messageIdCounter = useRef(0);
@@ -118,16 +127,40 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // 現在選択されているジョブのデータを取得
+  const selectedJob = selectedJobId ? activeJobs.get(selectedJobId) : null;
+
   // リアルタイムログストリーミングを開始する関数
   const startRealtimeLogStreaming = (jobId: string) => {
-    // 既存の接続があれば閉じる
-    if (sseConnection) {
-      sseConnection.close();
+    console.log(`🔴 リアルタイムログストリーミング開始: ${jobId}`);
+    
+    // 既存のジョブデータを取得または新規作成
+    const existingJob = activeJobs.get(jobId);
+    
+    // 既に接続されている場合はスキップ
+    if (existingJob?.connectionStatus === 'connected' || existingJob?.connectionStatus === 'connecting') {
+      console.log(`⚠️ 既にSSE接続が存在します: ${jobId}`);
+      return;
     }
     
-    console.log(`🔴 リアルタイムログストリーミング開始: ${jobId}`);
-    setConnectionStatus('connecting');
-    setRealtimeConversations([]);
+    if (existingJob?.sseConnection) {
+      existingJob.sseConnection.close();
+    }
+    
+    // ジョブデータを更新
+    setActiveJobs(prev => {
+      const newMap = new Map(prev);
+      newMap.set(jobId, {
+        ...existingJob,
+        jobId,
+        taskType: existingJob?.taskType || 'unknown',
+        status: existingJob?.status || 'running',
+        startTime: existingJob?.startTime || new Date(),
+        realtimeConversations: [],
+        connectionStatus: 'connecting'
+      });
+      return newMap;
+    });
     
     // リトライ機能付きSSE接続
     let retryCount = 0;
@@ -139,7 +172,14 @@ export default function ChatPage() {
       
       eventSource.onopen = () => {
         console.log('✅ SSE接続確立');
-        setConnectionStatus('connected');
+        setActiveJobs(prev => {
+          const newMap = new Map(prev);
+          const job = newMap.get(jobId);
+          if (job) {
+            newMap.set(jobId, { ...job, connectionStatus: 'connected' });
+          }
+          return newMap;
+        });
         retryCount = 0; // リセット
       };
       
@@ -151,25 +191,66 @@ export default function ChatPage() {
       eventSource.addEventListener('history', (event) => {
         const data = JSON.parse(event.data);
         console.log('📜 履歴受信:', data.count, '件');
-        setRealtimeConversations(data.conversationHistory);
+        setActiveJobs(prev => {
+          const newMap = new Map(prev);
+          const job = newMap.get(jobId);
+          if (job) {
+            newMap.set(jobId, { ...job, realtimeConversations: data.conversationHistory });
+          }
+          return newMap;
+        });
       });
       
       eventSource.addEventListener('log-entry', (event) => {
         const data = JSON.parse(event.data);
         console.log('📨 新規ログエントリ:', data.entry);
-        setRealtimeConversations(prev => [...prev, data.entry]);
+        setActiveJobs(prev => {
+          const newMap = new Map(prev);
+          const job = newMap.get(jobId);
+          if (job) {
+            newMap.set(jobId, { 
+              ...job, 
+              realtimeConversations: [...job.realtimeConversations, data.entry] 
+            });
+          }
+          return newMap;
+        });
       });
       
       eventSource.addEventListener('job-completed', (event) => {
         const data = JSON.parse(event.data);
         console.log('✅ ジョブ完了:', data);
-        setConnectionStatus('disconnected');
+        setActiveJobs(prev => {
+          const newMap = new Map(prev);
+          const job = newMap.get(jobId);
+          if (job) {
+            newMap.set(jobId, { 
+              ...job, 
+              status: 'completed',
+              connectionStatus: 'disconnected',
+              endTime: new Date()
+            });
+          }
+          return newMap;
+        });
       });
       
       eventSource.addEventListener('job-failed', (event) => {
         const data = JSON.parse(event.data);
         console.log('❌ ジョブ失敗:', data);
-        setConnectionStatus('error');
+        setActiveJobs(prev => {
+          const newMap = new Map(prev);
+          const job = newMap.get(jobId);
+          if (job) {
+            newMap.set(jobId, { 
+              ...job, 
+              status: 'failed',
+              connectionStatus: 'error',
+              endTime: new Date()
+            });
+          }
+          return newMap;
+        });
       });
       
       eventSource.addEventListener('heartbeat', (event) => {
@@ -188,7 +269,14 @@ export default function ChatPage() {
           if (retryCount < maxRetries) {
             retryCount++;
             console.log(`🔄 SSE接続をリトライ中 (${retryCount}/${maxRetries})...`);
-            setConnectionStatus('connecting');
+            setActiveJobs(prev => {
+              const newMap = new Map(prev);
+              const job = newMap.get(jobId);
+              if (job) {
+                newMap.set(jobId, { ...job, connectionStatus: 'connecting' });
+              }
+              return newMap;
+            });
             
             // 遅延してリトライ
             setTimeout(() => {
@@ -196,33 +284,79 @@ export default function ChatPage() {
             }, retryDelay * retryCount);
           } else {
             console.error('❌ SSE接続の最大リトライ回数に達しました');
-            setConnectionStatus('error');
+            setActiveJobs(prev => {
+              const newMap = new Map(prev);
+              const job = newMap.get(jobId);
+              if (job) {
+                newMap.set(jobId, { ...job, connectionStatus: 'error' });
+              }
+              return newMap;
+            });
           }
         }
       };
       
-      setSseConnection(eventSource);
+      // SSE接続をジョブデータに保存
+      setActiveJobs(prev => {
+        const newMap = new Map(prev);
+        const job = newMap.get(jobId);
+        if (job) {
+          newMap.set(jobId, { ...job, sseConnection: eventSource });
+        }
+        return newMap;
+      });
     };
     
     // 初回接続
     connectSSE();
   };
   
-  // SSE接続をクリーンアップ
+  // コンポーネントのクリーンアップ時にすべてのSSE接続を閉じる
   useEffect(() => {
     return () => {
-      if (sseConnection) {
-        sseConnection.close();
-      }
+      activeJobs.forEach(job => {
+        if (job.sseConnection) {
+          job.sseConnection.close();
+        }
+      });
     };
-  }, [sseConnection]);
+  }, []);
+  
+  // 古い完了済みジョブを定期的にクリーンアップ（最大20件まで保持）
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActiveJobs(prev => {
+        if (prev.size <= 20) return prev;
+        
+        const newMap = new Map(prev);
+        const sortedJobs = Array.from(prev.entries())
+          .sort((a, b) => b[1].startTime.getTime() - a[1].startTime.getTime());
+        
+        // 古い完了済みジョブを削除
+        const jobsToRemove = sortedJobs
+          .filter(([_, job]) => job.status !== 'running')
+          .slice(20);
+        
+        jobsToRemove.forEach(([jobId, job]) => {
+          if (job.sseConnection) {
+            job.sseConnection.close();
+          }
+          newMap.delete(jobId);
+        });
+        
+        return newMap;
+      });
+    }, 60000); // 1分ごとにチェック
+    
+    return () => clearInterval(interval);
+  }, []);
   
   // リアルタイムモードで会話が追加されたら自動スクロール
   useEffect(() => {
-    if (isRealTimeMode && realtimeConversations.length > 0) {
+    if (isRealTimeMode && selectedJob && selectedJob.realtimeConversations.length > 0) {
       logScrollRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [realtimeConversations, isRealTimeMode]);
+  }, [selectedJob?.realtimeConversations, isRealTimeMode]);
 
   // エージェントログを取得する関数
   const fetchAgentLogs = async (jobId: string) => {
@@ -243,8 +377,15 @@ export default function ChatPage() {
       const logsData = await response.json() as AgentLogsData;
       console.log('📦 取得したエージェントログ:', logsData);
       
-      setCurrentAgentLogs(logsData);
-      setShowAgentLogs(true);
+      // ジョブデータを更新
+      setActiveJobs(prev => {
+        const newMap = new Map(prev);
+        const job = newMap.get(jobId);
+        if (job) {
+          newMap.set(jobId, { ...job, agentLogs: logsData });
+        }
+        return newMap;
+      });
     } catch (error) {
       console.error('❌ エージェントログの取得エラー:', error);
     } finally {
@@ -458,22 +599,28 @@ export default function ChatPage() {
               case 'agent-network-job':
                 console.log(`🤖 エージェントネットワークジョブ検出: ${event.jobId}`);
                 console.log(`🤖 タスクタイプ: ${event.taskType}`);
-                // 最近のエージェントネットワークジョブリストに追加
-                setRecentAgentNetworkJobs(prev => {
-                  console.log(`📝 現在のジョブリスト:`, prev);
-                  const updated = [event.jobId, ...prev.filter(id => id !== event.jobId)];
-                  console.log(`📝 更新後のジョブリスト:`, updated);
-                  return updated.slice(0, 10); // 最新10件まで保持
+                
+                // ジョブデータを作成（自動ポップアップはしない）
+                console.log(`🔴 エージェントネットワークジョブ検出: ${event.jobId}`);
+                setActiveJobs(prev => {
+                  const newMap = new Map(prev);
+                  newMap.set(event.jobId, {
+                    jobId: event.jobId,
+                    taskType: event.taskType || 'unknown',
+                    status: 'running',
+                    startTime: new Date(),
+                    realtimeConversations: [],
+                    connectionStatus: 'disconnected'
+                  });
+                  return newMap;
                 });
                 
-                // リアルタイムモードの場合、自動的にモーダルを開いてSSE接続を開始
-                if (isRealTimeMode) {
-                  console.log(`🔴 エージェントネットワークジョブ検出 - モーダルを開いてSSE接続を開始`);
-                  // ジョブが作成されるまで少し待つ
+                // モーダルが開いていてリアルタイムモードの場合、自動的にSSE接続を開始
+                if (showAgentLogs && isRealTimeMode) {
+                  console.log(`🔴 モーダルが開いているため、新しいジョブのSSE接続を自動開始: ${event.jobId}`);
                   setTimeout(() => {
-                    setShowAgentLogs(true); // モーダルを開く
                     startRealtimeLogStreaming(event.jobId);
-                  }, 500);
+                  }, 500); // ジョブが作成されるのを待つ
                 }
                 break;
                 
@@ -590,42 +737,94 @@ export default function ChatPage() {
               )}
             </div>
             
-            {/* エージェントログビューアーボタン */}
-            {(() => {
-              console.log(`🎯 レンダリング時のジョブリスト:`, recentAgentNetworkJobs);
-              console.log(`🎯 ジョブリストの長さ:`, recentAgentNetworkJobs.length);
-              return null;
-            })()}
-            {recentAgentNetworkJobs.length > 0 && (
-              <Dialog open={showAgentLogs} onOpenChange={setShowAgentLogs}>
+            {/* エージェントログビューアーボタン（常時表示） */}
+            <Dialog open={showAgentLogs} onOpenChange={(open) => {
+              setShowAgentLogs(open);
+              
+              if (open && isRealTimeMode) {
+                // モーダルを開いた時、すべての実行中ジョブのSSE接続を開始
+                activeJobs.forEach((job, jobId) => {
+                  if (job.status === 'running' && job.connectionStatus === 'disconnected') {
+                    console.log(`🔴 モーダルオープン時にSSE接続を開始: ${jobId}`);
+                    setTimeout(() => {
+                      startRealtimeLogStreaming(jobId);
+                    }, 100);
+                  }
+                });
+              } else if (!open && isRealTimeMode) {
+                // モーダルを閉じた時にリアルタイムモードのSSE接続を停止
+                activeJobs.forEach(job => {
+                  if (job.sseConnection) {
+                    console.log(`🔌 モーダルクローズ時にSSE接続を停止`);
+                    job.sseConnection.close();
+                  }
+                });
+              }
+            }}>
                 <DialogTrigger asChild>
                   <button
                     onClick={() => {
-                      if (recentAgentNetworkJobs.length > 0) {
-                        const jobId = recentAgentNetworkJobs[0];
+                      // 最初のジョブを選択、またはジョブがない場合はただモーダルを開く
+                      const jobIds = Array.from(activeJobs.keys());
+                      if (jobIds.length > 0) {
+                        const firstJobId = jobIds[jobIds.length - 1]; // 最新のジョブ
+                        setSelectedJobId(firstJobId);
+                        
+                        // リアルタイムモードの場合、すべての実行中ジョブのSSE接続を開始
                         if (isRealTimeMode) {
-                          startRealtimeLogStreaming(jobId);
+                          activeJobs.forEach((job, jobId) => {
+                            if (job.status === 'running' && job.connectionStatus === 'disconnected') {
+                              console.log(`🔴 実行中ジョブのSSE接続を開始: ${jobId}`);
+                              startRealtimeLogStreaming(jobId);
+                            }
+                          });
                         } else {
-                          fetchAgentLogs(jobId);
+                          fetchAgentLogs(firstJobId);
                         }
                       }
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors relative"
                   >
                     <FileText className="w-5 h-5" />
                     エージェントログ
+                    {activeJobs.size > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center">
+                        {activeJobs.size}
+                      </span>
+                    )}
                   </button>
                 </DialogTrigger>
-                <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
+                <DialogContent className="max-w-5xl max-h-[85vh] overflow-hidden">
                   <DialogHeader>
                     <DialogTitle className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <MessageCircle className="w-5 h-5" />
-                        エージェント間の会話履歴
+                        エージェント間の会話履歴 {activeJobs.size > 0 && `(${activeJobs.size} ジョブ)`}
                       </div>
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => setIsRealTimeMode(!isRealTimeMode)}
+                          onClick={() => {
+                            const newMode = !isRealTimeMode;
+                            setIsRealTimeMode(newMode);
+                            
+                            if (newMode) {
+                              // リアルタイムモードに切り替えた時、すべての実行中ジョブのSSE接続を開始
+                              activeJobs.forEach((job, jobId) => {
+                                if (job.status === 'running' && job.connectionStatus === 'disconnected') {
+                                  console.log(`🔴 リアルタイムモードON: SSE接続を開始 ${jobId}`);
+                                  startRealtimeLogStreaming(jobId);
+                                }
+                              });
+                            } else {
+                              // 履歴モードに切り替えた時、すべてのSSE接続を停止
+                              activeJobs.forEach(job => {
+                                if (job.sseConnection) {
+                                  console.log(`🔌 履歴モードON: SSE接続を停止`);
+                                  job.sseConnection.close();
+                                }
+                              });
+                            }
+                          }}
                           className={`px-3 py-1 text-sm rounded-md transition-colors ${
                             isRealTimeMode 
                               ? 'bg-green-600 text-white hover:bg-green-700' 
@@ -634,7 +833,7 @@ export default function ChatPage() {
                         >
                           {isRealTimeMode ? '🔴 リアルタイム' : '📁 履歴'}
                         </button>
-                        {isRealTimeMode && connectionStatus === 'connected' && (
+                        {selectedJob && isRealTimeMode && selectedJob.connectionStatus === 'connected' && (
                           <span className="flex items-center gap-1 text-sm text-green-600 dark:text-green-400">
                             <span className="w-2 h-2 bg-green-600 dark:bg-green-400 rounded-full animate-pulse" />
                             接続中
@@ -643,23 +842,79 @@ export default function ChatPage() {
                       </div>
                     </DialogTitle>
                     <DialogDescription>
-                      {isRealTimeMode 
-                        ? `リアルタイムモード - 接続状態: ${connectionStatus}`
-                        : currentAgentLogs 
-                          ? `タスク: ${currentAgentLogs.taskType} | 実行時間: ${currentAgentLogs.executionSummary?.executionTime || 'N/A'}` 
-                          : 'ログを読み込み中...'}
+                      {selectedJob ? (
+                        isRealTimeMode 
+                          ? `リアルタイムモード - 接続状態: ${selectedJob.connectionStatus} | タスク: ${selectedJob.taskType}`
+                          : selectedJob.agentLogs 
+                            ? `タスク: ${selectedJob.agentLogs.taskType} | 実行時間: ${selectedJob.agentLogs.executionSummary?.executionTime || 'N/A'}` 
+                            : 'ログを読み込み中...'
+                      ) : activeJobs.size === 0 ? 'ジョブがありません' : 'ジョブを選択してください'}
                     </DialogDescription>
                   </DialogHeader>
                   
-                  <div className="mt-4 overflow-y-auto max-h-[60vh]">
-                    {loadingAgentLogs && !isRealTimeMode ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
+                  <div className="flex mt-4 gap-4 max-h-[65vh]">
+                    {/* ジョブリスト（左サイドバー） */}
+                    {activeJobs.size > 0 && (
+                      <div className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 pr-4 overflow-y-auto">
+                        <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3">アクティブなジョブ</h3>
+                        <div className="space-y-2">
+                          {Array.from(activeJobs.entries()).reverse().map(([jobId, job]) => (
+                            <button
+                              key={jobId}
+                              onClick={() => {
+                                setSelectedJobId(jobId);
+                                // リアルタイムモード以外でログを取得
+                                if (!isRealTimeMode && !job.agentLogs) {
+                                  fetchAgentLogs(jobId);
+                                }
+                              }}
+                              className={`w-full text-left p-3 rounded-lg transition-colors ${
+                                selectedJobId === jobId
+                                  ? 'bg-blue-100 dark:bg-blue-900 border-blue-500'
+                                  : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700'
+                              } border ${selectedJobId === jobId ? 'border-blue-500' : 'border-transparent'}`}
+                            >
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                    {job.taskType}
+                                  </p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    {job.startTime.toLocaleTimeString('ja-JP')}
+                                  </p>
+                                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 font-mono truncate">
+                                    {jobId.substring(0, 8)}...
+                                  </p>
+                                </div>
+                                <div className="flex-shrink-0 ml-2">
+                                  {job.status === 'running' ? (
+                                    <span className="flex items-center gap-1">
+                                      <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                                      <span className="text-xs text-green-600 dark:text-green-400">実行中</span>
+                                    </span>
+                                  ) : job.status === 'completed' ? (
+                                    <span className="text-xs text-blue-600 dark:text-blue-400">完了</span>
+                                  ) : (
+                                    <span className="text-xs text-red-600 dark:text-red-400">失敗</span>
+                                  )}
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {/* リアルタイムモードまたは履歴モードの会話を表示 */}
-                        {(isRealTimeMode ? realtimeConversations : currentAgentLogs?.conversationHistory || []).map((entry, index) => (
+                    )}
+                    
+                    {/* メインコンテンツ */}
+                    <div className="flex-1 overflow-y-auto">
+                      {loadingAgentLogs && !isRealTimeMode ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
+                        </div>
+                      ) : selectedJob ? (
+                        <div className="space-y-4">
+                          {/* リアルタイムモードまたは履歴モードの会話を表示 */}
+                          {(isRealTimeMode ? selectedJob.realtimeConversations : selectedJob.agentLogs?.conversationHistory || []).map((entry, index) => (
                           <div key={index} className="border-l-2 border-gray-200 dark:border-gray-700 pl-4">
                             <div className="flex items-start gap-3">
                               <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold ${
@@ -711,47 +966,25 @@ export default function ChatPage() {
                             </div>
                           </div>
                         ))}
-                        
-                        {/* データがない場合の表示 */}
-                        {((isRealTimeMode && realtimeConversations.length === 0) || 
-                          (!isRealTimeMode && (!currentAgentLogs?.conversationHistory || currentAgentLogs.conversationHistory.length === 0))) && (
-                          <p className="text-center text-gray-500 dark:text-gray-400 py-8">
-                            {isRealTimeMode ? 'リアルタイムログを待機中...' : '会話履歴がありません'}
-                          </p>
-                        )}
-                        
-                        {/* 自動スクロール用の参照 */}
-                        <div ref={logScrollRef} />
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* ジョブ選択ドロップダウン */}
-                  {recentAgentNetworkJobs.length > 1 && (
-                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                      <label className="text-sm text-gray-600 dark:text-gray-400">
-                        他のジョブを表示:
-                      </label>
-                      <select
-                        className="mt-1 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                        onChange={(e) => {
-                          const selectedJobId = e.target.value;
-                          if (isRealTimeMode) {
-                            startRealtimeLogStreaming(selectedJobId);
-                          } else {
-                            fetchAgentLogs(selectedJobId);
-                          }
-                        }}
-                        value={currentAgentLogs?.jobId || recentAgentNetworkJobs[0] || ''}
-                      >
-                        {recentAgentNetworkJobs.map((jobId) => (
-                          <option key={jobId} value={jobId}>
-                            {jobId}
-                          </option>
-                        ))}
-                      </select>
+                          
+                          {/* データがない場合の表示 */}
+                          {((isRealTimeMode && selectedJob.realtimeConversations.length === 0) || 
+                            (!isRealTimeMode && (!selectedJob.agentLogs?.conversationHistory || selectedJob.agentLogs.conversationHistory.length === 0))) && (
+                            <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                              {isRealTimeMode ? 'リアルタイムログを待機中...' : '会話履歴がありません'}
+                            </p>
+                          )}
+                          
+                          {/* 自動スクロール用の参照 */}
+                          <div ref={logScrollRef} />
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center py-8 text-gray-500 dark:text-gray-400">
+                          {activeJobs.size === 0 ? 'アクティブなジョブがありません' : '左からジョブを選択してください'}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </DialogContent>
               </Dialog>
             )}
