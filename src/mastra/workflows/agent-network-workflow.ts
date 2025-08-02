@@ -229,7 +229,8 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
               name: string, 
               content: string,
               lastSentLength: number, // 最後に送信した長さを記録
-              entryId?: string // エントリIDを保持
+              entryId?: string, // エントリIDを保持
+              isSent: boolean // 送信済みフラグ
             }>();
             let currentStreamingAgent: { id: string, name: string } | null = null;
             
@@ -460,19 +461,25 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                   name: agentName, 
                   content: '',
                   lastSentLength: 0,
-                  entryId: `${jobId}-${agentId}-${iterationCounter}-stream`
+                  entryId: `${jobId}-${agentId}-${iterationCounter}-stream`,
+                  isSent: false
                 });
                 
                 if (agentLogStore && jobId) {
                   iterationCounter++;
-                  const startEntry = formatAgentMessage(
-                    agentId,
-                    agentName,
-                    `${agentName}が応答を開始しました...`,
-                    iterationCounter,
-                    'internal'
-                  );
-                  agentLogStore.addLogEntry(jobId, startEntry);
+                  // 重複チェック用のキー
+                  const startMessageKey = `start-${agentId}-${iterationCounter}`;
+                  if (!processedMessageIds.has(startMessageKey)) {
+                    const startEntry = formatAgentMessage(
+                      agentId,
+                      agentName,
+                      `${agentName}が応答を開始しました...`,
+                      iterationCounter,
+                      'internal'
+                    );
+                    agentLogStore.addLogEntry(jobId, startEntry);
+                    processedMessageIds.add(startMessageKey);
+                  }
                 }
               }
               
@@ -511,7 +518,8 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                       name: agentName, 
                       content: '',
                       lastSentLength: 0,
-                      entryId: `${jobId}-${agentId}-${iterationCounter}-stream`
+                      entryId: `${jobId}-${agentId}-${iterationCounter}-stream`,
+                      isSent: false
                     });
                     console.log(`🔄 currentStreamingAgentを復元: ${agentId}`);
                   }
@@ -547,7 +555,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                 // エージェントの応答が完了したので、蓄積した全文を一度に送信
                 if (currentStreamingAgent) {
                   const agentOutput = agentOutputs.get(currentStreamingAgent.id);
-                  if (agentOutput && agentOutput.content) {
+                  if (agentOutput && agentOutput.content && !agentOutput.isSent) {
                     console.log(`✅ ${currentStreamingAgent.name}の応答完了 - ${agentOutput.content.length}文字`);
                     
                     const finalEntry = formatAgentMessage(
@@ -561,6 +569,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                     if (agentLogStore && jobId) {
                       console.log(`📤 ${currentStreamingAgent.name}の完全な出力を送信`);
                       agentLogStore.addLogEntry(jobId, finalEntry);
+                      agentOutput.isSent = true; // 送信済みとしてマーク
                     }
                     
                     conversationHistory.push(finalEntry);
@@ -655,7 +664,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                 // 現在のエージェントの出力がまだ送信されていない場合は送信
                 if (currentStreamingAgent) {
                   const agentOutput = agentOutputs.get(currentStreamingAgent.id);
-                  if (agentOutput && agentOutput.content && agentOutput.content.length > agentOutput.lastSentLength) {
+                  if (agentOutput && agentOutput.content && !agentOutput.isSent) {
                     console.log(`⚠️ step-finishでフォールバック送信: ${currentStreamingAgent.name} - ${agentOutput.content.length}文字`);
                     
                     const finalEntry = formatAgentMessage(
@@ -669,6 +678,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                     if (agentLogStore && jobId) {
                       console.log(`📤 ${currentStreamingAgent.name}の出力を送信（step-finish）`);
                       agentLogStore.addLogEntry(jobId, finalEntry);
+                      agentOutput.isSent = true; // 送信済みとしてマーク
                     }
                     
                     conversationHistory.push(finalEntry);
@@ -687,7 +697,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                 
                 // 最終チェック：まだ送信されていないエージェント出力があれば送信
                 for (const [agentId, agentOutput] of agentOutputs.entries()) {
-                  if (agentOutput.content && agentOutput.content.length > agentOutput.lastSentLength) {
+                  if (agentOutput.content && !agentOutput.isSent) {
                     console.log(`⚠️ 最終送信: ${agentOutput.name} - ${agentOutput.content.length}文字`);
                     
                     const finalEntry = formatAgentMessage(
@@ -700,6 +710,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                     
                     if (agentLogStore && jobId) {
                       agentLogStore.addLogEntry(jobId, finalEntry);
+                      agentOutput.isSent = true; // 送信済みとしてマーク
                     }
                     
                     conversationHistory.push(finalEntry);

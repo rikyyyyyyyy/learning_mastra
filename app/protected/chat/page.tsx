@@ -119,6 +119,7 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messageIdCounter = useRef(0);
   const logScrollRef = useRef<HTMLDivElement>(null);
+  const connectingJobs = useRef<Set<string>>(new Set());
   
   // threadIdを管理（セッション中は同じthreadIdを使用）
   const threadIdRef = useRef<string>(`thread-${Date.now()}`);
@@ -142,6 +143,15 @@ export default function ChatPage() {
       console.log(`⚠️ 既にSSE接続が存在します: ${jobId}`);
       return;
     }
+    
+    // 接続中フラグをチェック
+    if (connectingJobs.current.has(jobId)) {
+      console.log(`⚠️ 既に接続処理中です: ${jobId}`);
+      return;
+    }
+    
+    // 接続中フラグを設定
+    connectingJobs.current.add(jobId);
     
     if (existingJob?.sseConnection) {
       existingJob.sseConnection.close();
@@ -172,6 +182,8 @@ export default function ChatPage() {
       
       eventSource.onopen = () => {
         console.log('✅ SSE接続確立');
+        // 接続中フラグを削除
+        connectingJobs.current.delete(jobId);
         setActiveJobs(prev => {
           const newMap = new Map(prev);
           const job = newMap.get(jobId);
@@ -278,12 +290,17 @@ export default function ChatPage() {
               return newMap;
             });
             
+            // リトライ前にフラグを再設定
+            connectingJobs.current.add(jobId);
+            
             // 遅延してリトライ
             setTimeout(() => {
               connectSSE();
             }, retryDelay * retryCount);
           } else {
             console.error('❌ SSE接続の最大リトライ回数に達しました');
+            // エラー時にフラグを削除
+            connectingJobs.current.delete(jobId);
             setActiveJobs(prev => {
               const newMap = new Map(prev);
               const job = newMap.get(jobId);
@@ -308,7 +325,14 @@ export default function ChatPage() {
     };
     
     // 初回接続
-    connectSSE();
+    try {
+      connectSSE();
+    } finally {
+      // 接続処理が完了したらフラグを削除
+      setTimeout(() => {
+        connectingJobs.current.delete(jobId);
+      }, 1000);
+    }
   };
   
   // コンポーネントのクリーンアップ時にすべてのSSE接続を閉じる
@@ -618,9 +642,8 @@ export default function ChatPage() {
                 // モーダルが開いていてリアルタイムモードの場合、自動的にSSE接続を開始
                 if (showAgentLogs && isRealTimeMode) {
                   console.log(`🔴 モーダルが開いているため、新しいジョブのSSE接続を自動開始: ${event.jobId}`);
-                  setTimeout(() => {
-                    startRealtimeLogStreaming(event.jobId);
-                  }, 500); // ジョブが作成されるのを待つ
+                  // setTimeoutを使わずに直接実行
+                  startRealtimeLogStreaming(event.jobId);
                 }
                 break;
                 
@@ -686,10 +709,12 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 shadow-sm">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Bot className="w-8 h-8 text-purple-600 dark:text-purple-400" />
+            <div className="p-2 bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900 dark:to-purple-800 rounded-lg">
+              <Bot className="w-6 h-6 text-purple-700 dark:text-purple-300" />
+            </div>
             <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
               AI アシスタント
             </h1>
@@ -699,7 +724,7 @@ export default function ChatPage() {
             <div className="relative">
               <button
                 onClick={() => setShowModelDropdown(!showModelDropdown)}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow-md border border-gray-200 dark:border-gray-700"
               >
                 <span className="text-sm">
                   {AI_MODELS.find(m => m.id === selectedModel)?.name}
@@ -708,7 +733,7 @@ export default function ChatPage() {
               </button>
               
               {showModelDropdown && (
-                <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-10">
+                <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-2 z-10 animate-in fade-in slide-in-from-top-2 duration-200">
                   {AI_MODELS.map((model) => (
                     <button
                       key={model.id}
@@ -716,7 +741,7 @@ export default function ChatPage() {
                         setSelectedModel(model.id);
                         setShowModelDropdown(false);
                       }}
-                      className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 group"
                     >
                       <div className="flex items-center justify-between">
                         <div>
@@ -728,7 +753,7 @@ export default function ChatPage() {
                           </div>
                         </div>
                         {selectedModel === model.id && (
-                          <div className="w-2 h-2 bg-purple-600 rounded-full" />
+                          <div className="w-2 h-2 bg-gradient-to-r from-purple-600 to-purple-700 rounded-full shadow-sm" />
                         )}
                       </div>
                     </button>
@@ -737,18 +762,16 @@ export default function ChatPage() {
               )}
             </div>
             
-            {/* エージェントログビューアーボタン（常時表示） */}
+            {/* エージェントログビューアーボタン */}
             <Dialog open={showAgentLogs} onOpenChange={(open) => {
               setShowAgentLogs(open);
               
               if (open && isRealTimeMode) {
                 // モーダルを開いた時、すべての実行中ジョブのSSE接続を開始
                 activeJobs.forEach((job, jobId) => {
-                  if (job.status === 'running' && job.connectionStatus === 'disconnected') {
+                  if (job.status === 'running' && job.connectionStatus === 'disconnected' && !connectingJobs.current.has(jobId)) {
                     console.log(`🔴 モーダルオープン時にSSE接続を開始: ${jobId}`);
-                    setTimeout(() => {
-                      startRealtimeLogStreaming(jobId);
-                    }, 100);
+                    startRealtimeLogStreaming(jobId);
                   }
                 });
               } else if (!open && isRealTimeMode) {
@@ -761,9 +784,9 @@ export default function ChatPage() {
                 });
               }
             }}>
-                <DialogTrigger asChild>
-                  <button
-                    onClick={() => {
+              <DialogTrigger asChild>
+                <button
+                  onClick={() => {
                       // 最初のジョブを選択、またはジョブがない場合はただモーダルを開く
                       const jobIds = Array.from(activeJobs.keys());
                       if (jobIds.length > 0) {
@@ -773,7 +796,7 @@ export default function ChatPage() {
                         // リアルタイムモードの場合、すべての実行中ジョブのSSE接続を開始
                         if (isRealTimeMode) {
                           activeJobs.forEach((job, jobId) => {
-                            if (job.status === 'running' && job.connectionStatus === 'disconnected') {
+                            if (job.status === 'running' && job.connectionStatus === 'disconnected' && !connectingJobs.current.has(jobId)) {
                               console.log(`🔴 実行中ジョブのSSE接続を開始: ${jobId}`);
                               startRealtimeLogStreaming(jobId);
                             }
@@ -783,7 +806,7 @@ export default function ChatPage() {
                         }
                       }
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors relative"
+                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 relative"
                   >
                     <FileText className="w-5 h-5" />
                     エージェントログ
@@ -791,10 +814,10 @@ export default function ChatPage() {
                       <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center">
                         {activeJobs.size}
                       </span>
-                    )}
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="max-w-5xl max-h-[85vh] overflow-hidden">
+                  )}
+                </button>
+              </DialogTrigger>
+                <DialogContent className="max-w-5xl max-h-[85vh] overflow-hidden shadow-2xl">
                   <DialogHeader>
                     <DialogTitle className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -810,7 +833,7 @@ export default function ChatPage() {
                             if (newMode) {
                               // リアルタイムモードに切り替えた時、すべての実行中ジョブのSSE接続を開始
                               activeJobs.forEach((job, jobId) => {
-                                if (job.status === 'running' && job.connectionStatus === 'disconnected') {
+                                if (job.status === 'running' && job.connectionStatus === 'disconnected' && !connectingJobs.current.has(jobId)) {
                                   console.log(`🔴 リアルタイムモードON: SSE接続を開始 ${jobId}`);
                                   startRealtimeLogStreaming(jobId);
                                 }
@@ -825,10 +848,10 @@ export default function ChatPage() {
                               });
                             }
                           }}
-                          className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                          className={`px-3 py-1 text-sm rounded-md transition-all duration-200 ${
                             isRealTimeMode 
-                              ? 'bg-green-600 text-white hover:bg-green-700' 
-                              : 'bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-400 dark:hover:bg-gray-500'
+                              ? 'bg-gradient-to-r from-green-600 to-green-700 text-white hover:from-green-700 hover:to-green-800 shadow-sm' 
+                              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
                           }`}
                         >
                           {isRealTimeMode ? '🔴 リアルタイム' : '📁 履歴'}
@@ -856,7 +879,7 @@ export default function ChatPage() {
                     {/* ジョブリスト（左サイドバー） */}
                     {activeJobs.size > 0 && (
                       <div className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 pr-4 overflow-y-auto">
-                        <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3">アクティブなジョブ</h3>
+                        <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3 px-1">アクティブなジョブ</h3>
                         <div className="space-y-2">
                           {Array.from(activeJobs.entries()).reverse().map(([jobId, job]) => (
                             <button
@@ -868,11 +891,11 @@ export default function ChatPage() {
                                   fetchAgentLogs(jobId);
                                 }
                               }}
-                              className={`w-full text-left p-3 rounded-lg transition-colors ${
+                              className={`w-full text-left p-3 rounded-lg transition-all duration-200 ${
                                 selectedJobId === jobId
-                                  ? 'bg-blue-100 dark:bg-blue-900 border-blue-500'
-                                  : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700'
-                              } border ${selectedJobId === jobId ? 'border-blue-500' : 'border-transparent'}`}
+                                  ? 'bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900 dark:to-blue-800 border-blue-500 shadow-md transform scale-[1.02]'
+                                  : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 hover:shadow-md hover:transform hover:scale-[1.01]'
+                              } border ${selectedJobId === jobId ? 'border-blue-500' : 'border-gray-200 dark:border-gray-700'} shadow-sm`}
                             >
                               <div className="flex items-start justify-between">
                                 <div className="flex-1">
@@ -915,12 +938,12 @@ export default function ChatPage() {
                         <div className="space-y-4">
                           {/* リアルタイムモードまたは履歴モードの会話を表示 */}
                           {(isRealTimeMode ? selectedJob.realtimeConversations : selectedJob.agentLogs?.conversationHistory || []).map((entry, index) => (
-                          <div key={index} className="border-l-2 border-gray-200 dark:border-gray-700 pl-4">
+                          <div key={index} className="border-l-2 border-gray-200 dark:border-gray-700 pl-4 hover:border-gray-300 dark:hover:border-gray-600 transition-colors duration-200">
                             <div className="flex items-start gap-3">
-                              <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold ${
-                                entry.agentId === 'ceo' ? 'bg-purple-600' :
-                                entry.agentId === 'manager' ? 'bg-blue-600' :
-                                'bg-green-600'
+                              <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold shadow-md ${
+                                entry.agentId === 'ceo' ? 'bg-gradient-to-br from-purple-600 to-purple-700' :
+                                entry.agentId === 'manager' ? 'bg-gradient-to-br from-blue-600 to-blue-700' :
+                                'bg-gradient-to-br from-green-600 to-green-700'
                               }`}>
                                 {entry.agentId === 'ceo' ? 'CEO' :
                                  entry.agentId === 'manager' ? 'MGR' :
@@ -931,14 +954,14 @@ export default function ChatPage() {
                                   <h4 className="font-semibold text-gray-900 dark:text-white">
                                     {entry.agentName}
                                   </h4>
-                                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
                                     イテレーション {entry.iteration}
                                   </span>
                                   {entry.messageType && (
-                                    <span className={`text-xs px-2 py-0.5 rounded ${
-                                      entry.messageType === 'request' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' :
-                                      entry.messageType === 'response' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' :
-                                      'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                                    <span className={`text-xs px-2 py-0.5 rounded-full shadow-sm ${
+                                      entry.messageType === 'request' ? 'bg-gradient-to-r from-blue-100 to-blue-200 text-blue-700 dark:from-blue-900 dark:to-blue-800 dark:text-blue-300' :
+                                      entry.messageType === 'response' ? 'bg-gradient-to-r from-green-100 to-green-200 text-green-700 dark:from-green-900 dark:to-green-800 dark:text-green-300' :
+                                      'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 dark:from-gray-700 dark:to-gray-600 dark:text-gray-300'
                                     }`}>
                                       {entry.messageType}
                                     </span>
@@ -987,11 +1010,10 @@ export default function ChatPage() {
                   </div>
                 </DialogContent>
               </Dialog>
-            )}
             
             <button
               onClick={startNewConversation}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
             >
               <MessageSquarePlus className="w-5 h-5" />
               新しい会話
@@ -1011,10 +1033,10 @@ export default function ChatPage() {
               }`}
             >
               <div
-                className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-md ${
                   message.role === "user"
-                    ? "bg-purple-600 dark:bg-purple-500"
-                    : "bg-gray-200 dark:bg-gray-700"
+                    ? "bg-gradient-to-br from-purple-600 to-purple-700 dark:from-purple-500 dark:to-purple-600"
+                    : "bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800"
                 }`}
               >
                 {message.role === "user" ? (
@@ -1029,10 +1051,10 @@ export default function ChatPage() {
                 }`}
               >
                 <div
-                  className={`inline-block px-4 py-2 rounded-2xl ${
+                  className={`inline-block px-5 py-3 rounded-2xl shadow-sm transition-all duration-200 ${
                     message.role === "user"
-                      ? "bg-purple-600 dark:bg-purple-500 text-white"
-                      : "bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700"
+                      ? "bg-gradient-to-r from-purple-600 to-purple-700 dark:from-purple-500 dark:to-purple-600 text-white shadow-purple-500/20"
+                      : "bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 shadow-gray-500/10 hover:shadow-md"
                   }`}
                 >
                   <p className="whitespace-pre-wrap">
@@ -1059,11 +1081,11 @@ export default function ChatPage() {
           ))}
           {isLoading && (
             <div className="flex gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center shadow-md">
                 <Bot className="w-5 h-5 text-gray-600 dark:text-gray-300" />
               </div>
-              <div className="bg-white dark:bg-gray-800 px-4 py-2 rounded-2xl border border-gray-200 dark:border-gray-700">
-                <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+              <div className="bg-white dark:bg-gray-800 px-5 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm">
+                <Loader2 className="w-5 h-5 animate-spin text-purple-600 dark:text-purple-400" />
               </div>
             </div>
           )}
@@ -1072,7 +1094,7 @@ export default function ChatPage() {
       </div>
 
       {/* Input Area */}
-      <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-4 py-4">
+      <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-4 py-4 shadow-lg">
         <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
           <div className="flex gap-3">
             <textarea
@@ -1081,7 +1103,7 @@ export default function ChatPage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyPress}
               placeholder="メッセージを入力してください..."
-              className="flex-1 resize-none rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-4 py-3 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400"
+              className="flex-1 resize-none rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-3 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 transition-all duration-200 shadow-sm focus:shadow-md"
               rows={1}
               disabled={isLoading}
               autoComplete="off"
@@ -1089,7 +1111,7 @@ export default function ChatPage() {
             <button
               type="submit"
               disabled={!input.trim() || isLoading}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white rounded-lg transition-colors disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 disabled:from-gray-300 disabled:to-gray-300 dark:disabled:from-gray-600 dark:disabled:to-gray-600 text-white rounded-lg transition-all duration-200 disabled:cursor-not-allowed shadow-md hover:shadow-lg transform hover:-translate-y-0.5 disabled:transform-none disabled:shadow-none"
             >
               <Send className="w-5 h-5" />
             </button>
@@ -1099,8 +1121,8 @@ export default function ChatPage() {
 
       {/* スライドプレビューモーダル */}
       {showSlidePreview && currentSlidePreview && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full h-full max-w-6xl max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full h-full max-w-6xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
             {/* モーダルヘッダー */}
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center gap-3">
@@ -1118,7 +1140,7 @@ export default function ChatPage() {
               </div>
               <button
                 onClick={closeSlidePreview}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-all duration-200 hover:shadow-md"
               >
                 <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
               </button>
@@ -1128,7 +1150,7 @@ export default function ChatPage() {
             <div className="flex-1 p-4">
               <iframe
                 srcDoc={currentSlidePreview.htmlCode}
-                className="w-full h-full border border-gray-200 dark:border-gray-700 rounded-lg"
+                className="w-full h-full border border-gray-200 dark:border-gray-700 rounded-lg shadow-inner"
                 title="スライドプレビュー"
                 sandbox="allow-scripts allow-same-origin"
               />
@@ -1142,7 +1164,7 @@ export default function ChatPage() {
                 </div>
                 <button
                   onClick={closeSlidePreview}
-                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                  className="px-4 py-2 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
                 >
                   閉じる
                 </button>
