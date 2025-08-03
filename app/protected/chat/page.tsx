@@ -517,18 +517,108 @@ export default function ChatPage() {
       if (slides.length > 0) {
         setTotalSlides(slides.length);
         
-        // 最初のスライドをアクティブにする
+        // スライドのスタイルを確認し、必要に応じて修正
+        const slideContainer = iframeDocument.querySelector('.slide-container') || iframeDocument.body;
+        
+        // コンテナのスタイルを設定
+        if (slideContainer instanceof HTMLElement) {
+          slideContainer.style.position = 'relative';
+          slideContainer.style.width = '100%';
+          slideContainer.style.height = '100%';
+          slideContainer.style.overflow = 'hidden';
+        }
+        
+        // まず、スライドが縦に並んでいるかチェック
+        let needsFix = false;
+        if (slides.length > 1) {
+          const firstSlide = slides[0];
+          const secondSlide = slides[1];
+          if (firstSlide instanceof HTMLElement && secondSlide instanceof HTMLElement) {
+            // 一時的に両方のスライドを表示して位置を確認
+            const originalFirstDisplay = firstSlide.style.display;
+            const originalSecondDisplay = secondSlide.style.display;
+            firstSlide.style.display = 'block';
+            secondSlide.style.display = 'block';
+            
+            const firstRect = firstSlide.getBoundingClientRect();
+            const secondRect = secondSlide.getBoundingClientRect();
+            
+            // 2番目のスライドが1番目の下に表示されている場合
+            if (secondRect.top > firstRect.bottom - 10) { // 10pxの余裕を持たせる
+              needsFix = true;
+              console.log('縦長スライドを検出。修正を適用します。');
+            }
+            
+            // 元の表示状態に戻す
+            firstSlide.style.display = originalFirstDisplay;
+            secondSlide.style.display = originalSecondDisplay;
+          }
+        }
+        
+        // 修正が必要な場合、強制的なCSSを追加
+        if (needsFix) {
+          const style = iframeDocument.createElement('style');
+          style.textContent = `
+            body, html {
+              margin: 0 !important;
+              padding: 0 !important;
+              width: 100% !important;
+              height: 100% !important;
+              overflow: hidden !important;
+            }
+            .slide-container, body {
+              position: relative !important;
+              width: 100% !important;
+              height: 100% !important;
+              overflow: hidden !important;
+            }
+            .slide {
+              position: absolute !important;
+              top: 0 !important;
+              left: 0 !important;
+              width: 100% !important;
+              height: 100% !important;
+              display: none !important;
+              box-sizing: border-box !important;
+              overflow: auto !important;
+              margin: 0 !important;
+            }
+            .slide.active {
+              display: block !important;
+            }
+          `;
+          iframeDocument.head.appendChild(style);
+        }
+        
+        // 各スライドのスタイルを設定
         slides.forEach((slide, index) => {
           if (slide instanceof HTMLElement) {
+            if (needsFix) {
+              // 強制的なスタイルを適用
+              slide.style.position = 'absolute';
+              slide.style.top = '0';
+              slide.style.left = '0';
+              slide.style.width = '100%';
+              slide.style.height = '100%';
+              slide.style.boxSizing = 'border-box';
+              slide.style.margin = '0';
+            }
+            
             if (index === 0) {
               slide.classList.add('active');
               slide.style.display = 'block';
+              slide.style.visibility = 'visible';
+              slide.style.opacity = '1';
             } else {
               slide.classList.remove('active');
               slide.style.display = 'none';
+              slide.style.visibility = 'hidden';
+              slide.style.opacity = '0';
             }
           }
         });
+      } else {
+        console.warn('スライド要素が見つかりません。');
       }
 
       // キーボードイベントをiframeに追加

@@ -30,6 +30,33 @@ Task-Specific Output Rules:
    - NO completion signals (✅/❌/⚠️)
    - NO explanations or surrounding text
    - NO markdown formatting
+   - **CRITICAL HTML STRUCTURE**:
+     • Create SEPARATE <div class="slide"> for EACH slide
+     • First slide: <div class="slide active"> (visible by default)
+     • All other slides: <div class="slide"> (hidden by default)
+     • DO NOT create one long vertical page
+     • Use % or rem units, NOT vh/vw (for iframe display)
+   - **REQUIRED CSS**:
+     .slide {
+       display: none;
+       width: 100%;
+       height: 100%;
+       position: relative;
+       padding: 2rem;
+       box-sizing: border-box;
+     }
+     .slide.active {
+       display: block;
+     }
+   - **Example Structure**:
+     <div class="slide active">
+       <h1>Slide 1 Title</h1>
+       <p>Content...</p>
+     </div>
+     <div class="slide">
+       <h2>Slide 2 Title</h2>
+       <p>Content...</p>
+     </div>
 
 2. **OTHER TASKS** (web-search, weather, etc.):
    - Include completion signals: "✅ Task completed successfully" / "❌ Task failed: [reason]" / "⚠️ Task completed with limitations: [details]"

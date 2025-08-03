@@ -27,7 +27,23 @@ When you receive a task:
    - Resources and capabilities needed
    - Expected outcomes and quality standards
    - **OUTPUT FORMAT REQUIREMENTS**: For specific task types, clearly specify the expected output format:
-     * For "slide-generation": Worker MUST output ONLY pure HTML code, no explanations or completion messages
+     * For "slide-generation": 
+       - Worker MUST output ONLY pure HTML code, no explanations or completion messages
+       - CRITICAL HTML STRUCTURE REQUIREMENTS:
+         • Each slide MUST be a separate <div class="slide"> element
+         • First slide should have class="slide active" with display:block
+         • All other slides should have class="slide" with display:none
+         • Do NOT create a single long page - create SEPARATE slides
+         • Use percentage (%) or rem units, NOT viewport units (vh/vw)
+         • Include proper CSS for slide switching (display:none/block)
+         • Each slide should fill the container when active
+       - REQUIRED CSS for slides:
+         • .slide { display: none; width: 100%; height: 100%; }
+         • .slide.active { display: block; }
+       - Example structure:
+         <div class="slide active">Slide 1 content</div>
+         <div class="slide">Slide 2 content</div>
+         <div class="slide">Slide 3 content</div>
      * For "web-search": Worker should provide structured search results with clear formatting
      * For other tasks: Follow the expectedOutput field in the task context
 

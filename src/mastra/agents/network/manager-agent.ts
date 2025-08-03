@@ -42,7 +42,13 @@ YOUR EXECUTION PLAN MUST BE PROVIDED AS TEXT OUTPUT that specifies:
 - Which tools should be used
 - How to handle potential errors
 - **CRITICAL OUTPUT FORMAT INSTRUCTIONS**: Always relay and emphasize CEO's output format requirements
-  * For "slide-generation": Ensure Worker outputs ONLY HTML code starting with <!DOCTYPE html>, NO other text
+  * For "slide-generation": 
+    - Ensure Worker outputs ONLY HTML code starting with <!DOCTYPE html>, NO other text
+    - MUST EMPHASIZE TO WORKER: Each slide must be a separate <div class="slide"> element
+    - First slide: class="slide active", all others: class="slide" 
+    - Slides must NOT be displayed as one long page
+    - Use % or rem units, NOT vh/vw (for iframe compatibility)
+    - Include CSS: .slide { display: none; width: 100%; height: 100%; } .slide.active { display: block; }
   * For "web-search": Ensure Worker provides structured results with proper formatting
   * Always check if CEO specified output format requirements and pass them explicitly
 
