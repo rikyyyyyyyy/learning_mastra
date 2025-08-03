@@ -110,6 +110,9 @@ export default function ChatPage() {
       style?: string;
     };
   } | null>(null);
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [totalSlides, setTotalSlides] = useState(0);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [activeJobs, setActiveJobs] = useState<Map<string, JobData>>(new Map());
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [showAgentLogs, setShowAgentLogs] = useState(false);
@@ -432,12 +435,113 @@ export default function ChatPage() {
   }) => {
     setCurrentSlidePreview(previewData);
     setShowSlidePreview(true);
+    setCurrentSlideIndex(0); // スライドインデックスをリセット
+    // スライド数を初期化（後でiframeロード後に更新）
+    setTotalSlides(previewData.slideInfo?.slideCount || 5);
   };
 
   // スライドプレビューを閉じる関数
   const closeSlidePreview = () => {
     setShowSlidePreview(false);
     setCurrentSlidePreview(null);
+    setCurrentSlideIndex(0);
+    setTotalSlides(0);
+  };
+
+  // スライドナビゲーション関数
+  const navigateSlide = (direction: 'prev' | 'next') => {
+    if (!iframeRef.current || !iframeRef.current.contentWindow) return;
+
+    try {
+      const iframeWindow = iframeRef.current.contentWindow;
+      const iframeDocument = iframeRef.current.contentDocument;
+      
+      if (!iframeDocument) return;
+
+      // iframe内のスライドを取得
+      const slides = iframeDocument.querySelectorAll('.slide');
+      if (slides.length === 0) return;
+
+      // 総スライド数を更新
+      if (slides.length !== totalSlides) {
+        setTotalSlides(slides.length);
+      }
+
+      // 現在のスライドインデックスを計算
+      let newIndex = currentSlideIndex;
+      if (direction === 'next' && currentSlideIndex < slides.length - 1) {
+        newIndex = currentSlideIndex + 1;
+      } else if (direction === 'prev' && currentSlideIndex > 0) {
+        newIndex = currentSlideIndex - 1;
+      }
+
+      // スライドを切り替え
+      slides.forEach((slide, index) => {
+        if (slide instanceof HTMLElement) {
+          if (index === newIndex) {
+            slide.classList.add('active');
+            slide.style.display = 'block';
+          } else {
+            slide.classList.remove('active');
+            slide.style.display = 'none';
+          }
+        }
+      });
+
+      setCurrentSlideIndex(newIndex);
+
+      // iframe内にpreviousSlide/nextSlide関数があれば呼び出す
+      interface SlideNavigationWindow extends Window {
+        previousSlide?: () => void;
+        nextSlide?: () => void;
+      }
+      const slideWindow = iframeWindow as SlideNavigationWindow;
+      if (direction === 'prev' && typeof slideWindow.previousSlide === 'function') {
+        slideWindow.previousSlide();
+      } else if (direction === 'next' && typeof slideWindow.nextSlide === 'function') {
+        slideWindow.nextSlide();
+      }
+    } catch (error) {
+      console.error('スライドナビゲーションエラー:', error);
+    }
+  };
+
+  // iframeロード完了時の処理
+  const handleIframeLoad = () => {
+    if (!iframeRef.current || !iframeRef.current.contentDocument) return;
+
+    try {
+      const iframeDocument = iframeRef.current.contentDocument;
+      const slides = iframeDocument.querySelectorAll('.slide');
+      
+      if (slides.length > 0) {
+        setTotalSlides(slides.length);
+        
+        // 最初のスライドをアクティブにする
+        slides.forEach((slide, index) => {
+          if (slide instanceof HTMLElement) {
+            if (index === 0) {
+              slide.classList.add('active');
+              slide.style.display = 'block';
+            } else {
+              slide.classList.remove('active');
+              slide.style.display = 'none';
+            }
+          }
+        });
+      }
+
+      // キーボードイベントをiframeに追加
+      iframeDocument.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'ArrowLeft') {
+          navigateSlide('prev');
+        } else if (e.key === 'ArrowRight') {
+          navigateSlide('next');
+        }
+      });
+    } catch (error) {
+      console.error('iframeロードエラー:', error);
+    }
   };
 
   // ジョブIDからスライドプレビューを表示する関数
@@ -1155,15 +1259,48 @@ export default function ChatPage() {
         </div>
         
         {/* Slide Content */}
-        <div className="flex-1 p-4 overflow-hidden">
+        <div className="flex-1 p-4 overflow-hidden relative">
           <div className="w-full h-full bg-white dark:bg-gray-900 rounded-xl shadow-inner overflow-hidden">
             <iframe
+              ref={iframeRef}
               srcDoc={currentSlidePreview.htmlCode}
               className="w-full h-full"
               title="スライドプレビュー"
               sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals"
               style={{ border: 'none' }}
+              onLoad={handleIframeLoad}
             />
+          </div>
+          
+          {/* Navigation Controls */}
+          <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-4 bg-card/95 backdrop-blur-sm rounded-full shadow-lg px-6 py-3">
+            <button
+              onClick={() => navigateSlide('prev')}
+              disabled={currentSlideIndex === 0}
+              className="p-2 hover:bg-accent rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="前のスライド"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <span className="text-primary">{currentSlideIndex + 1}</span>
+              <span className="text-muted-foreground">/</span>
+              <span className="text-muted-foreground">{totalSlides}</span>
+            </div>
+            
+            <button
+              onClick={() => navigateSlide('next')}
+              disabled={currentSlideIndex === totalSlides - 1}
+              className="p-2 hover:bg-accent rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="次のスライド"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
           </div>
         </div>
         
