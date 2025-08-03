@@ -29,8 +29,8 @@ export const slidePreviewTool = createTool({
       };
     }
     
-    // ワークフローがスライド生成でない場合
-    if (jobResult.workflowId !== 'slideGenerationWorkflow') {
+    // ワークフローがスライド生成でない場合（通常のスライド生成またはエージェントネットワーク経由のどちらかをチェック）
+    if (jobResult.workflowId !== 'slideGenerationWorkflow' && jobResult.workflowId !== 'agent-network-workflow') {
       return {
         jobId,
         previewReady: false,
@@ -39,7 +39,29 @@ export const slidePreviewTool = createTool({
     }
     
     // スライド生成結果の存在確認
-    const slideResult = jobResult.result;
+    let slideResult = jobResult.result;
+    
+    // agent-networkワークフローの場合、結果の構造が異なる
+    if (jobResult.workflowId === 'agent-network-workflow' && 
+        slideResult && typeof slideResult === 'object' && 
+        'steps' in slideResult && 
+        slideResult.steps && typeof slideResult.steps === 'object' &&
+        'agent-network-execution' in slideResult.steps) {
+      const executionStep = slideResult.steps['agent-network-execution'] as { output?: { taskType?: string; result?: unknown } };
+      const networkOutput = executionStep.output;
+      
+      // タスクタイプがslide-generationであることを確認
+      if (networkOutput?.taskType !== 'slide-generation') {
+        return {
+          jobId,
+          previewReady: false,
+          message: `ジョブID「${jobId}」はスライド生成タスクではありません。`,
+        };
+      }
+      
+      // agent-networkワークフローの結果から実際のスライド結果を取得
+      slideResult = networkOutput.result;
+    }
     
     if (!slideResult || typeof slideResult !== 'object' || 
         !('htmlCode' in slideResult) || !slideResult.htmlCode) {

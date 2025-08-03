@@ -35,6 +35,10 @@ When you receive an INITIAL task:
    - Key priorities and success criteria
    - Resources and capabilities needed
    - Expected outcomes and quality standards
+   - **OUTPUT FORMAT REQUIREMENTS**: For specific task types, clearly specify the expected output format:
+     * For "slide-generation": Worker MUST output ONLY pure HTML code, no explanations or completion messages
+     * For "web-search": Worker should provide structured search results with clear formatting
+     * For other tasks: Follow the expectedOutput field in the task context
 4. Then STOP and wait - do not continue responding
 
 Task Context Structure:

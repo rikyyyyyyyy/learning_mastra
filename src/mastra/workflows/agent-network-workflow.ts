@@ -775,10 +775,85 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       }
       
       // 結果を整形
+      let finalResult = result?.result?.text || result?.text || result;
+      
+      // スライド生成タスクの特別処理
+      if (inputData.taskType === 'slide-generation') {
+        // Worker エージェントの出力（HTML）を会話履歴から抽出
+        const workerResponse = conversationHistory.find(entry => 
+          entry.agentId === 'worker' && 
+          entry.message.includes('<!DOCTYPE html>')
+        );
+        
+        if (workerResponse) {
+          // HTMLコードを抽出
+          let htmlCode = workerResponse.message;
+          
+          // HTMLコードが途中で切れている場合の対処
+          if (!htmlCode.includes('</html>')) {
+            console.warn('⚠️ HTMLコードが途中で切れています。補完を試みます。');
+            
+            // ナビゲーション部分が含まれていない場合、最小限のナビゲーションとJavaScriptを追加
+            if (!htmlCode.includes('class="navigation"')) {
+              const navigationHtml = `
+        <div class="navigation">
+            <button class="nav-btn" onclick="previousSlide()">← 前へ</button>
+            <button class="nav-btn" onclick="nextSlide()">次へ →</button>
+        </div>
+    </div>
+
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+        
+        document.getElementById('total-slides').textContent = totalSlides;
+        
+        function showSlide(n) {
+            slides[currentSlide].classList.remove('active');
+            currentSlide = (n + totalSlides) % totalSlides;
+            slides[currentSlide].classList.add('active');
+            document.getElementById('current-slide').textContent = currentSlide + 1;
+        }
+        
+        function nextSlide() {
+            showSlide(currentSlide + 1);
+        }
+        
+        function previousSlide() {
+            showSlide(currentSlide - 1);
+        }
+        
+        // キーボードナビゲーション
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight') nextSlide();
+            if (e.key === 'ArrowLeft') previousSlide();
+        });
+    </script>
+</body>
+</html>`;
+              htmlCode += navigationHtml;
+            } else {
+              // ナビゲーションは含まれているが、HTMLが完全に閉じていない場合
+              htmlCode += '\n</body>\n</html>';
+            }
+          }
+          
+          // slide-preview-toolが期待する形式で結果を構造化
+          finalResult = {
+            htmlCode: htmlCode,
+            topic: inputData.taskParameters?.topic || 'Untitled',
+            slideCount: inputData.taskParameters?.pages || inputData.taskParameters?.slideCount || 10,
+            style: inputData.taskParameters?.style || 'modern',
+            generationTime: Date.now() - startTime
+          };
+        }
+      }
+      
       return {
         success: true,
         taskType: inputData.taskType,
-        result: result?.result?.text || result?.text || result,
+        result: finalResult,
         executionSummary,
         conversationHistory,
       };

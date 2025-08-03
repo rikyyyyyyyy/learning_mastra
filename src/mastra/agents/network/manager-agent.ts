@@ -48,12 +48,17 @@ YOUR EXECUTION PLAN MUST BE PROVIDED AS TEXT OUTPUT that specifies:
 - Expected outputs and quality criteria
 - Which tools should be used
 - How to handle potential errors
+- **CRITICAL OUTPUT FORMAT INSTRUCTIONS**: Always relay and emphasize CEO's output format requirements
+  * For "slide-generation": Ensure Worker outputs ONLY HTML code starting with <!DOCTYPE html>, NO other text
+  * For "web-search": Ensure Worker provides structured results with proper formatting
+  * Always check if CEO specified output format requirements and pass them explicitly
 
 REMEMBER:
 1. ALWAYS provide plans and feedback as TEXT OUTPUT
 2. DO NOT use tools - only provide text responses
 3. The network depends on your text output to route to Workers
-4. Once the Worker completes the task and you've verified the results, clearly state "Task execution completed successfully" and provide a brief summary. Then STOP.`,
+4. Emphasize output format requirements to Worker multiple times if necessary
+5. Once the Worker completes the task and you've verified the results, clearly state "Task execution completed successfully" and provide a brief summary. Then STOP.`,
   model: anthropic('claude-sonnet-4-20250514'),
   tools: {},
   memory: sharedMemory,

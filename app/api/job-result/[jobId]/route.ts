@@ -27,17 +27,39 @@ export async function GET(
       return new Response("Job result not found", { status: 404 });
     }
     
-    // スライド生成ワークフローの結果のみ返す
-    if (jobResult.workflowId !== 'slideGenerationWorkflow') {
-      console.log(`❌ スライド生成ジョブではありません: ${jobId}`);
-      return new Response("Not a slide generation job", { status: 400 });
+    // スライド生成ワークフローの結果をチェック
+    let slideResult = jobResult.result;
+    let isSlideGenerationJob = false;
+    
+    // 通常のスライド生成ワークフローの場合
+    if (jobResult.workflowId === 'slideGenerationWorkflow') {
+      isSlideGenerationJob = true;
+    }
+    // agent-networkワークフロー経由のスライド生成の場合
+    else if (jobResult.workflowId === 'agent-network-workflow' && 
+             slideResult && typeof slideResult === 'object' &&
+             'steps' in slideResult && 
+             slideResult.steps && typeof slideResult.steps === 'object' &&
+             'agent-network-execution' in slideResult.steps) {
+      const executionStep = slideResult.steps['agent-network-execution'] as { 
+        output?: { taskType?: string; result?: unknown } 
+      };
+      if (executionStep.output?.taskType === 'slide-generation') {
+        isSlideGenerationJob = true;
+        // agent-networkワークフローの結果から実際のスライド結果を取得
+        slideResult = executionStep.output.result;
+      }
     }
     
-    const slideResult = jobResult.result;
+    if (!isSlideGenerationJob) {
+      console.log(`❌ スライド生成ジョブではありません: ${jobId} (workflowId: ${jobResult.workflowId})`);
+      return new Response("Not a slide generation job", { status: 400 });
+    }
     
     if (!slideResult || typeof slideResult !== 'object' || 
         !('htmlCode' in slideResult) || !slideResult.htmlCode) {
       console.log(`❌ HTMLコードが見つかりません: ${jobId}`);
+      console.log(`slideResult:`, JSON.stringify(slideResult, null, 2));
       return new Response("HTML code not found", { status: 404 });
     }
 

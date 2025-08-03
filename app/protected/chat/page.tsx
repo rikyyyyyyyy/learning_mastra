@@ -1155,7 +1155,7 @@ export default function ChatPage() {
                 srcDoc={currentSlidePreview.htmlCode}
                 className="w-full h-full border rounded-xl shadow-inner"
                 title="スライドプレビュー"
-                sandbox="allow-scripts allow-same-origin"
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals"
               />
             </div>
             
