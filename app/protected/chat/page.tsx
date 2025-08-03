@@ -708,13 +708,13 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="flex flex-col h-screen bg-background">
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 shadow-sm">
+      <div className="bg-card/50 backdrop-blur-xl border-b px-6 py-5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900 dark:to-purple-800 rounded-lg">
-              <Bot className="w-6 h-6 text-purple-700 dark:text-purple-300" />
+          <div className="flex items-center gap-4">
+            <div className="p-2.5 bg-primary/10 rounded-2xl">
+              <Bot className="w-6 h-6 text-primary" />
             </div>
             <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
               AI アシスタント
@@ -725,7 +725,7 @@ export default function ChatPage() {
             <div className="relative">
               <button
                 onClick={() => setShowModelDropdown(!showModelDropdown)}
-                className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow-md border border-gray-200 dark:border-gray-700"
+                className="flex items-center gap-2 px-4 py-2.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-xl transition-all duration-200 shadow-sm hover:shadow border"
               >
                 <span className="text-sm">
                   {AI_MODELS.find(m => m.id === selectedModel)?.name}
@@ -734,7 +734,7 @@ export default function ChatPage() {
               </button>
               
               {showModelDropdown && (
-                <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-2 z-10 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="absolute right-0 mt-2 w-72 bg-card/95 backdrop-blur-xl rounded-2xl shadow-2xl border py-2 z-10 animate-in fade-in slide-in-from-top-2 duration-200">
                   {AI_MODELS.map((model) => (
                     <button
                       key={model.id}
@@ -742,19 +742,19 @@ export default function ChatPage() {
                         setSelectedModel(model.id);
                         setShowModelDropdown(false);
                       }}
-                      className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 group"
+                      className="w-full px-4 py-3 text-left hover:bg-accent transition-all duration-200 group rounded-lg mx-2"
                     >
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className="font-medium text-gray-900 dark:text-white">
+                          <div className="font-medium text-foreground">
                             {model.name}
                           </div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                          <div className="text-sm text-muted-foreground">
                             {model.provider} - {model.description}
                           </div>
                         </div>
                         {selectedModel === model.id && (
-                          <div className="w-2 h-2 bg-gradient-to-r from-purple-600 to-purple-700 rounded-full shadow-sm" />
+                          <div className="w-2 h-2 bg-primary rounded-full" />
                         )}
                       </div>
                     </button>
@@ -807,18 +807,18 @@ export default function ChatPage() {
                         }
                       }
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 relative"
+                    className="flex items-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground rounded-xl transition-all duration-200 shadow-sm hover:shadow-md active:scale-[0.98] relative"
                   >
                     <FileText className="w-5 h-5" />
                     エージェントログ
                     {activeJobs.size > 0 && (
-                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center">
+                      <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center">
                         {activeJobs.size}
                       </span>
                   )}
                 </button>
               </DialogTrigger>
-                <DialogContent className="max-w-5xl max-h-[85vh] overflow-hidden shadow-2xl">
+                <DialogContent className="max-w-5xl max-h-[85vh] overflow-hidden">
                   <DialogHeader>
                     <DialogTitle className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -849,10 +849,10 @@ export default function ChatPage() {
                               });
                             }
                           }}
-                          className={`px-3 py-1 text-sm rounded-md transition-all duration-200 ${
+                          className={`px-3 py-1.5 text-sm rounded-lg transition-all duration-200 ${
                             isRealTimeMode 
-                              ? 'bg-gradient-to-r from-green-600 to-green-700 text-white hover:from-green-700 hover:to-green-800 shadow-sm' 
-                              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                              ? 'bg-primary text-primary-foreground shadow-sm hover:shadow' 
+                              : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
                           }`}
                         >
                           {isRealTimeMode ? '🔴 リアルタイム' : '📁 履歴'}
@@ -879,8 +879,8 @@ export default function ChatPage() {
                   <div className="flex mt-4 gap-4 max-h-[65vh]">
                     {/* ジョブリスト（左サイドバー） */}
                     {activeJobs.size > 0 && (
-                      <div className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 pr-4 overflow-y-auto">
-                        <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3 px-1">アクティブなジョブ</h3>
+                      <div className="w-64 flex-shrink-0 border-r pr-4 overflow-y-auto">
+                        <h3 className="font-semibold text-sm text-muted-foreground mb-3 px-1">アクティブなジョブ</h3>
                         <div className="space-y-2">
                           {Array.from(activeJobs.entries()).reverse().map(([jobId, job]) => (
                             <button
@@ -892,21 +892,21 @@ export default function ChatPage() {
                                   fetchAgentLogs(jobId);
                                 }
                               }}
-                              className={`w-full text-left p-3 rounded-lg transition-all duration-200 ${
+                              className={`w-full text-left p-3 rounded-xl transition-all duration-200 ${
                                 selectedJobId === jobId
-                                  ? 'bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900 dark:to-blue-800 border-blue-500 shadow-md transform scale-[1.02]'
-                                  : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 hover:shadow-md hover:transform hover:scale-[1.01]'
-                              } border ${selectedJobId === jobId ? 'border-blue-500' : 'border-gray-200 dark:border-gray-700'} shadow-sm`}
+                                  ? 'bg-accent border-accent-foreground/20 shadow-md'
+                                  : 'bg-card hover:bg-accent hover:shadow border'
+                              }`}
                             >
                               <div className="flex items-start justify-between">
                                 <div className="flex-1">
-                                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                  <p className="text-sm font-medium text-foreground truncate">
                                     {job.taskType}
                                   </p>
-                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  <p className="text-xs text-muted-foreground mt-1">
                                     {job.startTime.toLocaleTimeString('ja-JP')}
                                   </p>
-                                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 font-mono truncate">
+                                  <p className="text-xs text-muted-foreground/70 mt-0.5 font-mono truncate">
                                     {jobId.substring(0, 8)}...
                                   </p>
                                 </div>
@@ -914,12 +914,12 @@ export default function ChatPage() {
                                   {job.status === 'running' ? (
                                     <span className="flex items-center gap-1">
                                       <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                                      <span className="text-xs text-green-600 dark:text-green-400">実行中</span>
+                                      <span className="text-xs text-green-600 dark:text-green-500">実行中</span>
                                     </span>
                                   ) : job.status === 'completed' ? (
-                                    <span className="text-xs text-blue-600 dark:text-blue-400">完了</span>
+                                    <span className="text-xs text-blue-600 dark:text-blue-500">完了</span>
                                   ) : (
-                                    <span className="text-xs text-red-600 dark:text-red-400">失敗</span>
+                                    <span className="text-xs text-destructive">失敗</span>
                                   )}
                                 </div>
                               </div>
@@ -933,18 +933,18 @@ export default function ChatPage() {
                     <div className="flex-1 overflow-y-auto">
                       {loadingAgentLogs && !isRealTimeMode ? (
                         <div className="flex items-center justify-center py-8">
-                          <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
+                          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                         </div>
                       ) : selectedJob ? (
                         <div className="space-y-4">
                           {/* リアルタイムモードまたは履歴モードの会話を表示 */}
                           {(isRealTimeMode ? selectedJob.realtimeConversations : selectedJob.agentLogs?.conversationHistory || []).map((entry, index) => (
-                          <div key={index} className="border-l-2 border-gray-200 dark:border-gray-700 pl-4 hover:border-gray-300 dark:hover:border-gray-600 transition-colors duration-200">
+                          <div key={index} className="border-l-2 border-muted pl-4 hover:border-muted-foreground/50 transition-colors duration-200">
                             <div className="flex items-start gap-3">
-                              <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold shadow-md ${
-                                entry.agentId === 'ceo' ? 'bg-gradient-to-br from-purple-600 to-purple-700' :
-                                entry.agentId === 'manager' ? 'bg-gradient-to-br from-blue-600 to-blue-700' :
-                                'bg-gradient-to-br from-green-600 to-green-700'
+                              <div className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center font-semibold shadow-sm ${
+                                entry.agentId === 'ceo' ? 'bg-primary text-primary-foreground' :
+                                entry.agentId === 'manager' ? 'bg-secondary text-secondary-foreground' :
+                                'bg-accent text-accent-foreground'
                               }`}>
                                 {entry.agentId === 'ceo' ? 'CEO' :
                                  entry.agentId === 'manager' ? 'MGR' :
@@ -952,36 +952,36 @@ export default function ChatPage() {
                               </div>
                               <div className="flex-1">
                                 <div className="flex items-baseline gap-2 mb-1">
-                                  <h4 className="font-semibold text-gray-900 dark:text-white">
+                                  <h4 className="font-semibold text-foreground">
                                     {entry.agentName}
                                   </h4>
-                                  <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
+                                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-lg">
                                     イテレーション {entry.iteration}
                                   </span>
                                   {entry.messageType && (
-                                    <span className={`text-xs px-2 py-0.5 rounded-full shadow-sm ${
-                                      entry.messageType === 'request' ? 'bg-gradient-to-r from-blue-100 to-blue-200 text-blue-700 dark:from-blue-900 dark:to-blue-800 dark:text-blue-300' :
-                                      entry.messageType === 'response' ? 'bg-gradient-to-r from-green-100 to-green-200 text-green-700 dark:from-green-900 dark:to-green-800 dark:text-green-300' :
-                                      'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 dark:from-gray-700 dark:to-gray-600 dark:text-gray-300'
+                                    <span className={`text-xs px-2 py-0.5 rounded-lg ${
+                                      entry.messageType === 'request' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400' :
+                                      entry.messageType === 'response' ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400' :
+                                      'bg-muted text-muted-foreground'
                                     }`}>
                                       {entry.messageType}
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                                <p className="text-sm text-foreground/90 whitespace-pre-wrap">
                                   {entry.message}
                                 </p>
                                 <div className="flex items-center gap-3 mt-1">
-                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  <p className="text-xs text-muted-foreground">
                                     {new Date(entry.timestamp).toLocaleTimeString('ja-JP')}
                                   </p>
                                   {entry.metadata?.model && (
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                    <span className="text-xs text-muted-foreground">
                                       モデル: {entry.metadata.model}
                                     </span>
                                   )}
                                   {entry.metadata?.tools && entry.metadata.tools.length > 0 && (
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                    <span className="text-xs text-muted-foreground">
                                       ツール: {entry.metadata.tools.join(', ')}
                                     </span>
                                   )}
@@ -994,7 +994,7 @@ export default function ChatPage() {
                           {/* データがない場合の表示 */}
                           {((isRealTimeMode && selectedJob.realtimeConversations.length === 0) || 
                             (!isRealTimeMode && (!selectedJob.agentLogs?.conversationHistory || selectedJob.agentLogs.conversationHistory.length === 0))) && (
-                            <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                            <p className="text-center text-muted-foreground py-8">
                               {isRealTimeMode ? 'リアルタイムログを待機中...' : '会話履歴がありません'}
                             </p>
                           )}
@@ -1003,7 +1003,7 @@ export default function ChatPage() {
                           <div ref={logScrollRef} />
                         </div>
                       ) : (
-                        <div className="flex items-center justify-center py-8 text-gray-500 dark:text-gray-400">
+                        <div className="flex items-center justify-center py-8 text-muted-foreground">
                           {activeJobs.size === 0 ? 'アクティブなジョブがありません' : '左からジョブを選択してください'}
                         </div>
                       )}
@@ -1014,7 +1014,7 @@ export default function ChatPage() {
             
             <button
               onClick={startNewConversation}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+              className="flex items-center gap-2 px-4 py-2.5 bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-xl transition-all duration-200 shadow-sm hover:shadow active:scale-[0.98]"
             >
               <MessageSquarePlus className="w-5 h-5" />
               新しい会話
@@ -1025,19 +1025,19 @@ export default function ChatPage() {
 
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto">
-        <div className="py-8 px-6 md:px-12 lg:px-16">
+        <div className="py-8 px-6 md:px-12 lg:px-20 max-w-6xl mx-auto">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`mb-6 flex gap-3 ${
+              className={`mb-6 flex gap-4 ${
                 message.role === "user" ? "flex-row-reverse" : ""
               }`}
             >
               <div
-                className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-md ${
+                className={`flex-shrink-0 w-10 h-10 rounded-2xl flex items-center justify-center shadow-sm ${
                   message.role === "user"
-                    ? "bg-gradient-to-br from-purple-600 to-purple-700 dark:from-purple-500 dark:to-purple-600"
-                    : "bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-secondary"
                 }`}
               >
                 {message.role === "user" ? (
@@ -1054,8 +1054,8 @@ export default function ChatPage() {
                 <div
                   className={`inline-block px-5 py-3 rounded-2xl shadow-sm transition-all duration-200 ${
                     message.role === "user"
-                      ? "bg-gradient-to-r from-purple-600 to-purple-700 dark:from-purple-500 dark:to-purple-600 text-white shadow-purple-500/20"
-                      : "bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 shadow-gray-500/10 hover:shadow-md"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-card border hover:shadow"
                   }`}
                 >
                   <p className="whitespace-pre-wrap">
@@ -1081,12 +1081,12 @@ export default function ChatPage() {
             </div>
           ))}
           {isLoading && (
-            <div className="flex gap-3">
-              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center shadow-md">
-                <Bot className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            <div className="flex gap-4">
+              <div className="flex-shrink-0 w-10 h-10 rounded-2xl bg-secondary flex items-center justify-center shadow-sm">
+                <Bot className="w-5 h-5 text-muted-foreground" />
               </div>
-              <div className="bg-white dark:bg-gray-800 px-5 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm">
-                <Loader2 className="w-5 h-5 animate-spin text-purple-600 dark:text-purple-400" />
+              <div className="bg-card px-5 py-3 rounded-2xl border shadow-sm">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
               </div>
             </div>
           )}
@@ -1095,8 +1095,8 @@ export default function ChatPage() {
       </div>
 
       {/* Input Area */}
-      <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 md:px-12 lg:px-16 py-4 shadow-lg">
-        <form onSubmit={handleSubmit}>
+      <div className="bg-card/50 backdrop-blur-xl border-t px-6 md:px-12 lg:px-20 py-5">
+        <form onSubmit={handleSubmit} className="max-w-6xl mx-auto">
           <div className="flex gap-3">
             <textarea
               ref={inputRef}
@@ -1106,7 +1106,7 @@ export default function ChatPage() {
               onCompositionStart={() => setIsComposing(true)}
               onCompositionEnd={() => setIsComposing(false)}
               placeholder="メッセージを入力してください..."
-              className="flex-1 resize-none rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-3 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 transition-all duration-200 shadow-sm focus:shadow-md"
+              className="flex-1 resize-none rounded-xl border bg-background px-4 py-3 placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all duration-200 shadow-sm focus:shadow"
               rows={1}
               disabled={isLoading}
               autoComplete="off"
@@ -1114,7 +1114,7 @@ export default function ChatPage() {
             <button
               type="submit"
               disabled={!input.trim() || isLoading}
-              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 disabled:from-gray-300 disabled:to-gray-300 dark:disabled:from-gray-600 dark:disabled:to-gray-600 text-white rounded-lg transition-all duration-200 disabled:cursor-not-allowed shadow-md hover:shadow-lg transform hover:-translate-y-0.5 disabled:transform-none disabled:shadow-none"
+              className="px-5 py-3 bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground rounded-xl transition-all duration-200 disabled:cursor-not-allowed shadow-sm hover:shadow-md active:scale-[0.98] disabled:active:scale-100"
             >
               <Send className="w-5 h-5" />
             </button>
@@ -1124,18 +1124,18 @@ export default function ChatPage() {
 
       {/* スライドプレビューモーダル */}
       {showSlidePreview && currentSlidePreview && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full h-full max-w-6xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200">
+          <div className="bg-card/95 backdrop-blur-xl rounded-2xl shadow-2xl w-full h-full max-w-6xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
             {/* モーダルヘッダー */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between p-6 border-b">
               <div className="flex items-center gap-3">
-                <Eye className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                <Eye className="w-6 h-6 text-primary" />
                 <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  <h2 className="text-lg font-semibold text-foreground">
                     スライドプレビュー
                   </h2>
                   {currentSlidePreview.slideInfo && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                    <p className="text-sm text-muted-foreground">
                       {currentSlidePreview.slideInfo.topic} - {currentSlidePreview.slideInfo.slideCount}枚 ({currentSlidePreview.slideInfo.style})
                     </p>
                   )}
@@ -1143,31 +1143,31 @@ export default function ChatPage() {
               </div>
               <button
                 onClick={closeSlidePreview}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-all duration-200 hover:shadow-md"
+                className="p-2 hover:bg-accent rounded-xl transition-all duration-200"
               >
-                <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                <X className="w-5 h-5 text-muted-foreground" />
               </button>
             </div>
             
             {/* スライドコンテンツ */}
-            <div className="flex-1 p-4">
+            <div className="flex-1 p-6">
               <iframe
                 srcDoc={currentSlidePreview.htmlCode}
-                className="w-full h-full border border-gray-200 dark:border-gray-700 rounded-lg shadow-inner"
+                className="w-full h-full border rounded-xl shadow-inner"
                 title="スライドプレビュー"
                 sandbox="allow-scripts allow-same-origin"
               />
             </div>
             
             {/* モーダルフッター */}
-            <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+            <div className="p-6 border-t">
               <div className="flex items-center justify-between">
-                <div className="text-sm text-gray-600 dark:text-gray-400">
+                <div className="text-sm text-muted-foreground">
                   Job ID: {currentSlidePreview.jobId}
                 </div>
                 <button
                   onClick={closeSlidePreview}
-                  className="px-4 py-2 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                  className="px-4 py-2.5 bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-xl transition-all duration-200 shadow-sm hover:shadow active:scale-[0.98]"
                 >
                   閉じる
                 </button>
