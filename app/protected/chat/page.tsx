@@ -708,19 +708,21 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background">
-      {/* Header */}
-      <div className="bg-card/50 backdrop-blur-xl border-b px-6 py-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="p-2.5 bg-primary/10 rounded-2xl">
-              <Bot className="w-6 h-6 text-primary" />
+    <div className="flex h-screen bg-background">
+      {/* Left side - Chat area */}
+      <div className={`flex flex-col ${showSlidePreview ? 'w-1/2' : 'w-full'} transition-all duration-300`}>
+        {/* Header */}
+        <div className="bg-card/50 backdrop-blur-xl border-b px-6 py-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-2.5 bg-primary/10 rounded-2xl">
+                <Bot className="w-6 h-6 text-primary" />
+              </div>
+              <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
+                AI アシスタント
+              </h1>
             </div>
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-              AI アシスタント
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
             {/* モデル選択ドロップダウン */}
             <div className="relative">
               <button
@@ -1025,7 +1027,7 @@ export default function ChatPage() {
 
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto">
-        <div className="py-8 px-6 md:px-12 lg:px-20 max-w-6xl mx-auto">
+        <div className={`py-8 px-6 ${showSlidePreview ? 'md:px-8 lg:px-12' : 'md:px-12 lg:px-20'} max-w-4xl mx-auto`}>
           {messages.map((message) => (
             <div
               key={message.id}
@@ -1095,8 +1097,8 @@ export default function ChatPage() {
       </div>
 
       {/* Input Area */}
-      <div className="bg-card/50 backdrop-blur-xl border-t px-6 md:px-12 lg:px-20 py-5">
-        <form onSubmit={handleSubmit} className="max-w-6xl mx-auto">
+      <div className="bg-card/50 backdrop-blur-xl border-t px-6 py-5">
+        <form onSubmit={handleSubmit} className={`${showSlidePreview ? 'md:px-8 lg:px-12' : 'md:px-12 lg:px-20'} max-w-4xl mx-auto`}>
           <div className="flex gap-3">
             <textarea
               ref={inputRef}
@@ -1121,61 +1123,63 @@ export default function ChatPage() {
           </div>
         </form>
       </div>
+    </div>
 
-      {/* スライドプレビューモーダル */}
-      {showSlidePreview && currentSlidePreview && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200">
-          <div className="bg-card/95 backdrop-blur-xl rounded-2xl shadow-2xl w-full h-full max-w-6xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
-            {/* モーダルヘッダー */}
-            <div className="flex items-center justify-between p-6 border-b">
-              <div className="flex items-center gap-3">
-                <Eye className="w-6 h-6 text-primary" />
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground">
-                    スライドプレビュー
-                  </h2>
-                  {currentSlidePreview.slideInfo && (
-                    <p className="text-sm text-muted-foreground">
-                      {currentSlidePreview.slideInfo.topic} - {currentSlidePreview.slideInfo.slideCount}枚 ({currentSlidePreview.slideInfo.style})
-                    </p>
-                  )}
-                </div>
+    {/* Right side - Slide Preview Panel */}
+    {showSlidePreview && currentSlidePreview && (
+      <div className="w-1/2 border-l flex flex-col bg-card animate-in slide-in-from-right duration-300">
+        {/* Preview Header */}
+        <div className="bg-card/50 backdrop-blur-xl border-b px-6 py-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Eye className="w-5 h-5 text-primary" />
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">
+                  スライドプレビュー
+                </h2>
+                {currentSlidePreview.slideInfo && (
+                  <p className="text-sm text-muted-foreground">
+                    {currentSlidePreview.slideInfo.topic} - {currentSlidePreview.slideInfo.slideCount}枚
+                  </p>
+                )}
               </div>
-              <button
-                onClick={closeSlidePreview}
-                className="p-2 hover:bg-accent rounded-xl transition-all duration-200"
-              >
-                <X className="w-5 h-5 text-muted-foreground" />
-              </button>
             </div>
-            
-            {/* スライドコンテンツ */}
-            <div className="flex-1 p-6">
-              <iframe
-                srcDoc={currentSlidePreview.htmlCode}
-                className="w-full h-full border rounded-xl shadow-inner"
-                title="スライドプレビュー"
-                sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals"
-              />
+            <button
+              onClick={closeSlidePreview}
+              className="p-2 hover:bg-accent rounded-xl transition-all duration-200"
+              title="プレビューを閉じる"
+            >
+              <X className="w-5 h-5 text-muted-foreground" />
+            </button>
+          </div>
+        </div>
+        
+        {/* Slide Content */}
+        <div className="flex-1 p-4 overflow-hidden">
+          <div className="w-full h-full bg-white dark:bg-gray-900 rounded-xl shadow-inner overflow-hidden">
+            <iframe
+              srcDoc={currentSlidePreview.htmlCode}
+              className="w-full h-full"
+              title="スライドプレビュー"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals"
+              style={{ border: 'none' }}
+            />
+          </div>
+        </div>
+        
+        {/* Preview Footer */}
+        <div className="border-t px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-muted-foreground font-mono">
+              Job ID: {currentSlidePreview.jobId.substring(0, 16)}...
             </div>
-            
-            {/* モーダルフッター */}
-            <div className="p-6 border-t">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-muted-foreground">
-                  Job ID: {currentSlidePreview.jobId}
-                </div>
-                <button
-                  onClick={closeSlidePreview}
-                  className="px-4 py-2.5 bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-xl transition-all duration-200 shadow-sm hover:shadow active:scale-[0.98]"
-                >
-                  閉じる
-                </button>
-              </div>
+            <div className="text-xs text-muted-foreground">
+              {currentSlidePreview.slideInfo?.style || 'modern'} スタイル
             </div>
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    )}
+  </div>
   );
 }

@@ -45,16 +45,31 @@ const generateSlideStep = createStep({
 
 1. **HTML構造**: 完全に独立したHTMLファイルとして作成
 2. **スタイリング**: 内部CSSを使用してモダンで美しいデザイン
-3. **レスポンシブ**: 様々な画面サイズに対応
-4. **ナビゲーション**: キーボード（←→）とクリックでスライド切り替え
+3. **レスポンシブ**: 様々な画面サイズに対応（特にiframe内での表示を考慮）
+4. **ナビゲーション**: 
+   - **必須**: 画面下部に「前へ」「次へ」ボタンを常に表示
+   - キーボード（←→）でもスライド切り替え可能
+   - 現在のスライド番号/総スライド数を右上に表示
 5. **アニメーション**: 滑らかなスライド遷移効果
 6. **コンテンツ**: 各スライドに適切なタイトル、内容、視覚的要素
+7. **サイズ**: viewport単位(vw/vh)ではなく、%やrem単位を使用（iframe内での表示対応）
 
 **重要**: 
 - 外部ライブラリは使用せず、純粋なHTML/CSS/JavaScriptで作成
 - CDNリンクも使用しない
 - 完全に自己完結したHTMLコードのみを出力
 - レスポンス全体がHTMLコードになるように
+- **必ず画面下部にナビゲーションボタンを含める**
+- **必ず右上にスライドカウンターを含める**
+
+**必須のHTML構造**:
+<div class="navigation">
+    <button class="nav-btn" onclick="previousSlide()">← 前へ</button>
+    <button class="nav-btn" onclick="nextSlide()">次へ →</button>
+</div>
+<div class="slide-counter">
+    <span id="current-slide">1</span> / <span id="total-slides">${slideCount}</span>
+</div>
 
 **スライドの構成**:
 1. タイトルスライド
@@ -115,10 +130,16 @@ const generateSlideStep = createStep({
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             overflow: hidden;
+            width: 100%;
+            height: 100%;
+        }
+        html {
+            width: 100%;
+            height: 100%;
         }
         .slide-container {
-            width: 100vw;
-            height: 100vh;
+            width: 100%;
+            height: 100%;
             position: relative;
         }
         .slide {
@@ -148,7 +169,7 @@ const generateSlideStep = createStep({
         .slide p {
             font-size: 1.5rem;
             line-height: 1.6;
-            max-width: 800px;
+            max-width: 80%;
             margin: 0 auto;
         }
         .navigation {
@@ -158,6 +179,7 @@ const generateSlideStep = createStep({
             transform: translateX(-50%);
             display: flex;
             gap: 10px;
+            z-index: 100;
         }
         .nav-btn {
             background: rgba(255,255,255,0.2);
@@ -167,9 +189,13 @@ const generateSlideStep = createStep({
             border-radius: 5px;
             cursor: pointer;
             font-size: 1rem;
+            transition: background 0.3s;
         }
         .nav-btn:hover {
             background: rgba(255,255,255,0.3);
+        }
+        .nav-btn:active {
+            background: rgba(255,255,255,0.4);
         }
         .slide-counter {
             position: absolute;
@@ -179,6 +205,7 @@ const generateSlideStep = createStep({
             padding: 10px 20px;
             border-radius: 20px;
             font-size: 1rem;
+            z-index: 100;
         }
     </style>
 </head>
