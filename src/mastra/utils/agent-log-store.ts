@@ -39,23 +39,8 @@ export interface LogStoreEvents {
   'job-failed': (jobId: string, error: string) => void;
 }
 
-// 型安全なEventEmitter
-class TypedEventEmitter<TEvents extends Record<string, (...args: unknown[]) => void>> extends EventEmitter {
-  emit<K extends keyof TEvents>(event: K, ...args: Parameters<TEvents[K]>): boolean {
-    return super.emit(event as string, ...args);
-  }
-
-  on<K extends keyof TEvents>(event: K, listener: TEvents[K]): this {
-    return super.on(event as string, listener);
-  }
-
-  off<K extends keyof TEvents>(event: K, listener: TEvents[K]): this {
-    return super.off(event as string, listener);
-  }
-}
-
 // エージェントログストアクラス
-class AgentLogStore extends TypedEventEmitter<LogStoreEvents> {
+class AgentLogStore extends EventEmitter {
   private logs: Map<string, JobLog> = new Map();
   private maxLogsPerJob = 1000; // ジョブあたりの最大ログ数
   private cleanupInterval: NodeJS.Timeout;

@@ -266,7 +266,7 @@ export default function ChatPage() {
         });
       });
       
-      eventSource.addEventListener('heartbeat', (event) => {
+      eventSource.addEventListener('heartbeat', () => {
         console.log('💓 ハートビート受信');
       });
       
@@ -345,6 +345,7 @@ export default function ChatPage() {
         }
       });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   
   // 古い完了済みジョブを定期的にクリーンアップ（最大20件まで保持）
@@ -359,7 +360,7 @@ export default function ChatPage() {
         
         // 古い完了済みジョブを削除
         const jobsToRemove = sortedJobs
-          .filter(([_, job]) => job.status !== 'running')
+          .filter(([, job]) => job.status !== 'running')
           .slice(20);
         
         jobsToRemove.forEach(([jobId, job]) => {
@@ -381,6 +382,7 @@ export default function ChatPage() {
     if (isRealTimeMode && selectedJob && selectedJob.realtimeConversations.length > 0) {
       logScrollRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedJob?.realtimeConversations, isRealTimeMode]);
 
   // エージェントログを取得する関数

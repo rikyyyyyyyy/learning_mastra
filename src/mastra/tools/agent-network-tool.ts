@@ -51,6 +51,7 @@ const executeAgentNetworkWorkflow = async (
     // ワークフローの実行中にstep-startイベントを監視
     const runTyped = run as {
       start: (options: { inputData: unknown; runtimeContext?: unknown }) => Promise<unknown>;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       watch?: (callback: (event: any) => void, channel?: string) => void;
     };
     

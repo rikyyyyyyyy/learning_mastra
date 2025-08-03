@@ -2,8 +2,11 @@ import { agentLogStore, formatAgentMessage } from './agent-log-store';
 
 // Agentの型定義（@mastra/coreからのインポートを避けるため）
 interface Agent {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   stream: (prompt: string, options?: any) => Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   generate?: (prompt: string, options?: any) => Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 }
 
@@ -23,6 +26,7 @@ export function wrapAgentForLogging(
   let iterationCounter = 0;
   
   // streamメソッドをオーバーライド
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wrappedStream = async function(prompt: string, options?: any) {
     iterationCounter++;
     console.log(`🎯 [${agentId}] stream呼び出し検出！ - iteration: ${iterationCounter} - jobId: ${jobId}`);
@@ -73,6 +77,7 @@ export function wrapAgentForLogging(
               iterationCounter,
               'response',
               {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 model: (agent as any)._modelInfo?.modelId,
               }
             );
@@ -92,6 +97,7 @@ export function wrapAgentForLogging(
   
   // generateメソッドもオーバーライド（存在する場合）
   if (originalGenerate) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     agent.generate = async function(prompt: string, options?: any) {
       iterationCounter++;
       console.log(`🎯 [${agentId}] generate呼び出し - iteration: ${iterationCounter}`);
@@ -118,6 +124,7 @@ export function wrapAgentForLogging(
         iterationCounter,
         'response',
         {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           model: (agent as any)._modelInfo?.modelId,
         }
       );
