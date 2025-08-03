@@ -101,13 +101,7 @@ const agentNetworkStep = createStep({
       const agentNetwork = new NewAgentNetwork({
         id: 'task-execution-network',
         name: 'Task Execution Network',
-        instructions: `Coordinate task execution through CEO-Manager-Worker hierarchy. The network automatically routes between agents based on the conversation flow.
-        
-IMPORTANT ROUTING RULES:
-- CEO provides strategic direction ONCE then stops
-- Manager creates execution plan ONCE then waits for Worker
-- Worker executes task ONCE and signals completion
-- When task is marked complete (✅/❌/⚠️), terminate the loop`,
+        instructions: `Coordinate task execution through CEO-Manager-Worker hierarchy. The network automatically routes between agents based on the conversation flow.`,
         model: anthropic('claude-sonnet-4-20250514'),
         agents: {
           'ceo': ceoAgent,
@@ -174,7 +168,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       let result;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const conversationHistory: any[] = [];
-      let iterationCounter = 0;
+      let iterationCounter = 1; // 1から開始（最初のCEOの応答が1回目）
       
       // jobIdをコンテキストに追加（エージェントがアクセスできるように）
       if (runtimeContext && jobId) {
@@ -235,9 +229,11 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
               content: string,
               lastSentLength: number, // 最後に送信した長さを記録
               entryId?: string, // エントリIDを保持
-              isSent: boolean // 送信済みフラグ
+              isSent: boolean, // 送信済みフラグ
+              iteration: number // このエージェントのイテレーション番号
             }>();
             let currentStreamingAgent: { id: string, name: string } | null = null;
+            let lastActiveAgent: string | null = null; // 最後にアクティブだったエージェントを追跡
             
             // イベントカウンタ（デバッグ用）
             const eventCounts = {
@@ -282,7 +278,6 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
               }
               
               if (chunk.type === 'agent-routing') {
-                iterationCounter++;
                 const routingInfo = chunk.data;
                 console.log(`🔀 エージェントルーティング: ${routingInfo.fromAgent} → ${routingInfo.toAgent}`);
                 
@@ -338,7 +333,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                       agentId,
                       agentName,
                       agentOutput.content,
-                      iterationCounter,
+                      agentOutput.iteration, // 保存されたイテレーション番号を使用
                       'response'
                     );
                     
@@ -375,27 +370,52 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                   fullChunk: JSON.stringify(chunk)
                 });
                 
-                const agentName = chunk.name || chunk.toolName || '';
-                let agentId = 'system';
+                // エージェント情報を抽出
+                let agentName = 'Unknown Agent';
+                let agentId = 'unknown';
                 
-                // chunk.argsから実際のエージェントIDを取得する試み
-                if (chunk.args?.resourceId) {
-                  if (chunk.args.resourceId.includes('ceo')) {
+                // chunk.nameから直接エージェント情報を取得
+                if (chunk.name) {
+                  // chunk.nameはエージェント名を含むことが多い
+                  if (chunk.name.toLowerCase().includes('ceo')) {
                     agentId = 'ceo';
-                  } else if (chunk.args.resourceId.includes('manager')) {
+                    agentName = 'CEO Agent';
+                  } else if (chunk.name.toLowerCase().includes('manager')) {
                     agentId = 'manager';
-                  } else if (chunk.args.resourceId.includes('worker')) {
+                    agentName = 'Manager Agent';
+                  } else if (chunk.name.toLowerCase().includes('worker')) {
                     agentId = 'worker';
+                    agentName = 'Worker Agent';
+                  } else {
+                    // chunk.nameが直接エージェント名の場合
+                    agentName = chunk.name;
+                    agentId = chunk.name.toLowerCase().replace(/\s+/g, '-');
                   }
-                } else if (agentName.toLowerCase().includes('ceo')) {
-                  agentId = 'ceo';
-                } else if (agentName.toLowerCase().includes('manager')) {
-                  agentId = 'manager';
-                } else if (agentName.toLowerCase().includes('worker')) {
-                  agentId = 'worker';
+                }
+                
+                // chunk.argsから追加情報を取得（フォールバック）
+                if (chunk.args?.resourceId) {
+                  console.log(`📋 resourceIdから追加情報を取得: ${chunk.args.resourceId}`);
+                  if (chunk.args.resourceId.includes('ceo') && agentId === 'unknown') {
+                    agentId = 'ceo';
+                    agentName = 'CEO Agent';
+                  } else if (chunk.args.resourceId.includes('manager') && agentId === 'unknown') {
+                    agentId = 'manager';
+                    agentName = 'Manager Agent';
+                  } else if (chunk.args.resourceId.includes('worker') && agentId === 'unknown') {
+                    agentId = 'worker';
+                    agentName = 'Worker Agent';
+                  }
                 }
                 
                 console.log(`🎯 エージェント識別結果: agentId=${agentId}, agentName=${agentName}`);
+                
+                // エージェントが切り替わった場合、イテレーションカウンターを増やす
+                if (lastActiveAgent && lastActiveAgent !== agentId) {
+                  iterationCounter++;
+                  console.log(`📈 イテレーションカウンターを増加: ${iterationCounter} (${lastActiveAgent} → ${agentId})`);
+                }
+                lastActiveAgent = agentId;
                 
                 // 現在ストリーミング中のエージェントを記録
                 currentStreamingAgent = { id: agentId, name: agentName };
@@ -405,11 +425,11 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                   content: '',
                   lastSentLength: 0,
                   entryId: `${jobId}-${agentId}-${iterationCounter}-stream`,
-                  isSent: false
+                  isSent: false,
+                  iteration: iterationCounter
                 });
                 
                 if (agentLogStore && jobId) {
-                  iterationCounter++;
                   // 重複チェック用のキー
                   const startMessageKey = `start-${agentId}-${iterationCounter}`;
                   if (!processedMessageIds.has(startMessageKey)) {
@@ -455,6 +475,13 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                       agentName = 'Worker Agent';
                     }
                     
+                    // エージェントが切り替わった場合、イテレーションカウンターを増やす
+                    if (lastActiveAgent && lastActiveAgent !== agentId) {
+                      iterationCounter++;
+                      console.log(`📈 [delta] イテレーションカウンターを増加: ${iterationCounter} (${lastActiveAgent} → ${agentId})`);
+                    }
+                    lastActiveAgent = agentId;
+                    
                     currentStreamingAgent = { id: agentId, name: agentName };
                     agentOutputs.set(agentId, { 
                       id: agentId, 
@@ -462,7 +489,8 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                       content: '',
                       lastSentLength: 0,
                       entryId: `${jobId}-${agentId}-${iterationCounter}-stream`,
-                      isSent: false
+                      isSent: false,
+                      iteration: iterationCounter
                     });
                     console.log(`🔄 currentStreamingAgentを復元: ${agentId}`);
                   }
@@ -505,7 +533,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                       currentStreamingAgent.id,
                       currentStreamingAgent.name,
                       agentOutput.content,
-                      iterationCounter,
+                      agentOutput.iteration, // 保存されたイテレーション番号を使用
                       'response'
                     );
                     
@@ -563,7 +591,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                       currentStreamingAgent.id,
                       currentStreamingAgent.name,
                       agentOutput.content,
-                      iterationCounter,
+                      agentOutput.iteration, // 保存されたイテレーション番号を使用
                       'response'
                     );
                     
@@ -583,7 +611,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                       currentStreamingAgent.id,
                       currentStreamingAgent.name,
                       resultText,
-                      iterationCounter,
+                      iterationCounter, // tool-resultのフォールバックなので現在のカウンターを使用
                       'response'
                     );
                     
@@ -614,7 +642,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                       currentStreamingAgent.id,
                       currentStreamingAgent.name,
                       agentOutput.content,
-                      iterationCounter,
+                      agentOutput.iteration, // 保存されたイテレーション番号を使用
                       'response'
                     );
                     
@@ -647,7 +675,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                       agentId,
                       agentOutput.name,
                       agentOutput.content,
-                      iterationCounter,
+                      agentOutput.iteration, // 保存されたイテレーション番号を使用
                       'response'
                     );
                     

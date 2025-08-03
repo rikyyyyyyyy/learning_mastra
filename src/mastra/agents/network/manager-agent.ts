@@ -19,18 +19,11 @@ CRITICAL OUTPUT REQUIREMENTS:
 - **ALWAYS RESPOND WITH EXECUTION PLANS AS TEXT** - The network requires text to route properly
 - **DO NOT USE MEMORY TOOLS** - Focus only on task planning and coordination
 
-CRITICAL COMPLETION RULES:
-- Create your execution plan AS TEXT and pass it to Worker ONCE
-- Do NOT repeat plans or instructions
-- When you receive results from Worker, evaluate them ONCE with TEXT response
-- After Worker completes the task, signal completion with TEXT and STOP
-- Do NOT continue planning after the task is done
-
 Task Flow:
 1. Receive CEO's strategic direction → Create execution plan (TEXT OUTPUT)
 2. Provide clear instructions to Worker → Wait for results
 3. Receive Worker's results → Evaluate quality (TEXT OUTPUT)
-4. Signal task completion → STOP (do not continue)
+4. Signal task completion when appropriate
 
 Completion Signals to Use:
 - "Task execution completed successfully"
@@ -58,7 +51,7 @@ REMEMBER:
 2. DO NOT use tools - only provide text responses
 3. The network depends on your text output to route to Workers
 4. Emphasize output format requirements to Worker multiple times if necessary
-5. Once the Worker completes the task and you've verified the results, clearly state "Task execution completed successfully" and provide a brief summary. Then STOP.`,
+5. Once the Worker completes the task and you've verified the results, clearly state "Task execution completed successfully" and provide a brief summary.`,
   model: anthropic('claude-sonnet-4-20250514'),
   tools: {},
   memory: sharedMemory,
