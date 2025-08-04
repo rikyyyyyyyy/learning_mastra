@@ -2,14 +2,8 @@
 import { Mastra } from '@mastra/core/mastra';
 import { PinoLogger } from '@mastra/loggers';
 import { LibSQLStore } from '@mastra/libsql';
-// Legacy workflows (will be archived)
-import { weatherWorkflow } from './workflows/legacy/weather-workflow';
-import { webSearchWorkflow } from './workflows/legacy/web-search-workflow-mcp';
-import { slideGenerationWorkflow } from './workflows/legacy/slide-generation-workflow';
 // New unified workflow
 import { agentNetworkWorkflow } from './workflows/agent-network-workflow';
-// Legacy agents (kept for compatibility)
-import { weatherAgent } from './agents/weather-agent';
 import { generalAgent } from './agents/general-agent';
 import { workflowAgent } from './agents/workflow-agent';
 import { workflowSearchAgent } from './agents/workflow-search-agent';
@@ -20,16 +14,10 @@ import { workerAgent } from './agents/network/worker-agent';
 
 export const mastra = new Mastra({
   workflows: { 
-    // Legacy workflows (kept for backward compatibility)
-    weatherWorkflow,
-    webSearchWorkflow,
-    slideGenerationWorkflow,
     // New unified workflow
     'agent-network-workflow': agentNetworkWorkflow,
   },
   agents: { 
-    // Legacy agents
-    weatherAgent, 
     generalAgent,
     workflowAgent,
     workflowSearchAgent,

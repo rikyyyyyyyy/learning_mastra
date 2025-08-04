@@ -29,8 +29,8 @@ export const slidePreviewTool = createTool({
       };
     }
     
-    // ワークフローがスライド生成でない場合（通常のスライド生成またはエージェントネットワーク経由のどちらかをチェック）
-    if (jobResult.workflowId !== 'slideGenerationWorkflow' && jobResult.workflowId !== 'agent-network-workflow') {
+    // ワークフローがagent-networkでない場合
+    if (jobResult.workflowId !== 'agent-network-workflow') {
       return {
         jobId,
         previewReady: false,

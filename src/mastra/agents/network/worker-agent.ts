@@ -2,7 +2,6 @@ import { Agent } from '@mastra/core/agent';
 import { anthropic } from '@ai-sdk/anthropic';
 import { sharedMemory } from '../../shared-memory';
 import { exaMCPSearchTool } from '../../tools/exa-search-wrapper';
-import { weatherTool } from '../../tools/legacy/weather-tool';
 
 export const workerAgent = new Agent({
   name: 'Worker Agent - Task Executor',
@@ -58,13 +57,12 @@ Task-Specific Output Rules:
        <p>Content...</p>
      </div>
 
-2. **OTHER TASKS** (web-search, weather, etc.):
+2. **OTHER TASKS** (web-search, etc.):
    - Include completion signals: "✅ Task completed successfully" / "❌ Task failed: [reason]" / "⚠️ Task completed with limitations: [details]"
    - Provide clear text explanations with results
 
 Available Tools:
 - **exaMCPSearchTool**: For advanced web searches and information gathering (supports web, research papers, GitHub, companies, LinkedIn, Wikipedia)
-- **weatherTool**: For weather information retrieval
 - Additional tools will be made available as needed
 
 Task Execution Flow:
@@ -80,7 +78,6 @@ Output Format:
   model: anthropic('claude-sonnet-4-20250514'),
   tools: { 
     exaMCPSearchTool,
-    weatherTool,
     // Additional tools can be added here as the system grows
   },
   memory: sharedMemory,

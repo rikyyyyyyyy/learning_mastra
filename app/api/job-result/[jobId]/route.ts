@@ -31,12 +31,8 @@ export async function GET(
     let slideResult = jobResult.result;
     let isSlideGenerationJob = false;
     
-    // 通常のスライド生成ワークフローの場合
-    if (jobResult.workflowId === 'slideGenerationWorkflow') {
-      isSlideGenerationJob = true;
-    }
     // agent-networkワークフロー経由のスライド生成の場合
-    else if (jobResult.workflowId === 'agent-network-workflow' && 
+    if (jobResult.workflowId === 'agent-network-workflow' && 
              slideResult && typeof slideResult === 'object' &&
              'steps' in slideResult && 
              slideResult.steps && typeof slideResult.steps === 'object' &&

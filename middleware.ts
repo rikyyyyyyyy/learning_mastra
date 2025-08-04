@@ -16,6 +16,6 @@ export const config = {
      * - api/agent-logs/stream (SSE endpoints)
      * Feel free to modify this pattern to include more paths.
      */
-    "/((?!_next/static|_next/image|favicon.ico|api/agent-logs|api/test-sse|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/agent-logs|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
