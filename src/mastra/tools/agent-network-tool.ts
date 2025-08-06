@@ -1,11 +1,12 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
+import { NewAgentNetwork } from '@mastra/core/network/vNext';
+import { anthropic } from '@ai-sdk/anthropic';
+import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
 
-
-
-// バックグラウンドでワークフローを実行
-const executeAgentNetworkWorkflow = async (
+// バックグラウンドでエージェントネットワークを実行
+const executeAgentNetwork = async (
   mastraInstance: unknown,
   jobId: string,
   inputData: {
@@ -22,72 +23,422 @@ const executeAgentNetworkWorkflow = async (
   },
   runtimeContext?: unknown
 ) => {
+  const startTime = Date.now();
+  
   try {
-    console.log('🚀 エージェントネットワークワークフローを開始:', {
+    console.log('🚀 エージェントネットワーク実行開始:', {
       jobId,
       taskType: inputData.taskType,
       timestamp: new Date().toISOString()
     });
 
-    // ワークフローを開始
+    // Mastraインスタンスが利用可能か確認
     const mastraTyped = mastraInstance as { 
-      getWorkflow: (id: string) => unknown 
+      getAgent: (id: string) => unknown;
+      getMemory: () => unknown;
     };
-    const workflow = mastraTyped.getWorkflow('agent-network-workflow');
-    if (!workflow) {
-      throw new Error('agent-network-workflowが見つかりません');
+    if (!mastraTyped) {
+      throw new Error('Mastraインスタンスが利用できません');
     }
-
-    const workflowInstance = workflow as { 
-      createRunAsync: (options: { runId: string }) => Promise<{
-        start: (options: { inputData: unknown; runtimeContext?: unknown }) => Promise<unknown>;
-      }>
-    };
-    const run = await workflowInstance.createRunAsync({ runId: jobId });
 
     // ジョブステータスを実行中に更新
     updateJobStatus(jobId, 'running');
+
+    // エージェントを取得
+    const ceoAgentOriginal = mastraTyped.getAgent('ceo-agent');
+    const managerAgentOriginal = mastraTyped.getAgent('manager-agent');
+    const workerAgentOriginal = mastraTyped.getAgent('worker-agent');
+
+    if (!ceoAgentOriginal || !managerAgentOriginal || !workerAgentOriginal) {
+      throw new Error('必要なエージェントが見つかりません');
+    }
     
-    // ワークフローの実行中にstep-startイベントを監視
-    const runTyped = run as {
-      start: (options: { inputData: unknown; runtimeContext?: unknown }) => Promise<unknown>;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      watch?: (callback: (event: any) => void, channel?: string) => void;
-    };
+    // エージェントをそのまま使用
+    const ceoAgent = ceoAgentOriginal;
+    const managerAgent = managerAgentOriginal;
+    const workerAgent = workerAgentOriginal;
+
+    // メモリ設定を準備
+    const resourceId = (runtimeContext as { get: (key: string) => unknown })?.get?.('resourceId') as string | undefined;
+    const threadId = (runtimeContext as { get: (key: string) => unknown })?.get?.('threadId') as string | undefined;
+    const memoryConfig = resourceId && threadId ? {
+      resource: resourceId,
+      thread: threadId,
+    } : undefined;
+
+    // メモリを取得
+    const memory = memoryConfig ? mastraTyped?.getMemory() : undefined;
     
-    // step-startやstep-finishイベントのみを監視（ワークフローレベルのイベント）
-    if (runTyped.watch) {
-      console.log('🔍 ワークフローレベルのイベント監視を開始');
-      
-      runTyped.watch((event) => {
-        // ワークフローレベルのイベントのみログ出力
-        if (event.type === 'step-start' || event.type === 'step-finish' || event.type === 'step-result') {
-          console.log(`📡 ワークフローイベント: ${event.type}`);
-        }
-      }, 'watch-v2');
+    // エージェントネットワークを作成
+    const agentNetwork = new NewAgentNetwork({
+      id: 'task-execution-network',
+      name: 'Task Execution Network',
+      instructions: `Coordinate task execution through CEO-Manager-Worker hierarchy. The network automatically routes between agents based on the conversation flow.`,
+      model: anthropic('claude-sonnet-4-20250514'),
+      agents: {
+        'ceo': ceoAgent,
+        'manager': managerAgent,
+        'worker': workerAgent,
+      },
+      defaultAgent: ceoAgent,
+      memory: memory,
+    });
+
+    // タスクコンテキストを準備
+    let parsedParameters = inputData.taskParameters;
+    if (typeof inputData.taskParameters === 'string') {
+      try {
+        parsedParameters = JSON.parse(inputData.taskParameters);
+      } catch (e) {
+        console.warn('taskParametersのパースに失敗しました:', e);
+      }
     }
 
-    // ワークフローの完了を待つ
-    const result = await run.start({ inputData, runtimeContext });
+    const networkPrompt = `
+Execute the following task:
+Type: ${inputData.taskType}
+Description: ${inputData.taskDescription}
+Parameters: ${JSON.stringify(parsedParameters, null, 2)}
+${inputData.context?.expectedOutput ? `Expected Output: ${inputData.context.expectedOutput}` : ''}
+${inputData.context?.constraints ? `Constraints: ${JSON.stringify(inputData.context.constraints)}` : ''}
+${inputData.context?.additionalInstructions ? `Additional Instructions: ${inputData.context.additionalInstructions}` : ''}
 
-    console.log('✅ エージェントネットワークワークフローが完了:', {
+Priority: ${inputData.context?.priority || 'medium'}
+
+As the CEO agent, analyze this task and provide strategic direction. The agent network will automatically route your guidance to the appropriate agents for planning and execution.
+`;
+
+    console.log('🎯 ネットワークプロンプト:', networkPrompt);
+
+    // ログストアのジョブを作成
+    const jobLog = agentLogStore.getJobLog(jobId);
+    if (!jobLog) {
+      agentLogStore.createJob(jobId, inputData.taskType);
+    }
+
+    // jobIdをコンテキストに追加
+    if (runtimeContext && jobId) {
+      (runtimeContext as { set: (key: string, value: unknown) => void }).set('currentJobId', jobId);
+      (runtimeContext as { set: (key: string, value: unknown) => void }).set('taskType', inputData.taskType);
+    }
+
+    // カスタムオプションでエージェントネットワークのloopメソッドを実行
+    const networkOptions = {
+      maxIterations: 10,
+      debug: process.env.AGENT_NETWORK_DEBUG === 'true',
+      stream: true,
+    };
+    
+    console.log('🚀 エージェントネットワーク実行オプション:', networkOptions);
+    
+    let result;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const conversationHistory: any[] = [];
+    let iterationCounter = 1;
+    
+    // エージェントネットワークを実行
+    console.log(`🎯 NewAgentNetwork実行開始 - jobId: ${jobId}`);
+    
+    // loopStreamメソッドが存在する場合はそれを使用
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (typeof (agentNetwork as any).loopStream === 'function') {
+      console.log('🌊 loopStreamメソッドを使用してストリーミング実行');
+      
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const streamResult = await (agentNetwork as any).loopStream(
+        networkPrompt,
+        {
+          ...networkOptions,
+          threadId: memoryConfig?.thread,
+          resourceId: memoryConfig?.resource,
+          runtimeContext
+        }
+      );
+      
+      // ストリームの処理
+      if (streamResult && streamResult.stream) {
+        console.log('🌊 ストリームオブジェクトを取得');
+        
+        const agentOutputs = new Map<string, { 
+          id: string, 
+          name: string, 
+          content: string,
+          lastSentLength: number,
+          entryId?: string,
+          isSent: boolean,
+          iteration: number
+        }>();
+        let currentStreamingAgent: { id: string, name: string } | null = null;
+        let lastActiveAgent: string | null = null;
+        const processedMessageIds = new Set<string>();
+        
+        // ストリームからイベントを処理
+        for await (const chunk of streamResult.stream) {
+          
+          // エージェントルーティングイベント
+          if (chunk.type === 'agent-routing') {
+            const routingInfo = chunk.data;
+            console.log(`🔀 エージェントルーティング: ${routingInfo.fromAgent} → ${routingInfo.toAgent}`);
+            
+            const routingEntry = formatAgentMessage(
+              'system',
+              'Network Router',
+              `ルーティング: ${routingInfo.fromAgent} → ${routingInfo.toAgent}\n理由: ${routingInfo.reason || 'N/A'}`,
+              iterationCounter,
+              'internal'
+            );
+            agentLogStore.addLogEntry(jobId, routingEntry);
+          }
+          
+          // ツール呼び出し開始
+          if (chunk.type === 'tool-call-streaming-start') {
+            let agentName = 'Unknown Agent';
+            let agentId = 'unknown';
+            
+            if (chunk.name) {
+              if (chunk.name.toLowerCase().includes('ceo')) {
+                agentId = 'ceo';
+                agentName = 'CEO Agent';
+              } else if (chunk.name.toLowerCase().includes('manager')) {
+                agentId = 'manager';
+                agentName = 'Manager Agent';
+              } else if (chunk.name.toLowerCase().includes('worker')) {
+                agentId = 'worker';
+                agentName = 'Worker Agent';
+              } else {
+                agentName = chunk.name;
+                agentId = chunk.name.toLowerCase().replace(/\s+/g, '-');
+              }
+            }
+            
+            if (lastActiveAgent && lastActiveAgent !== agentId) {
+              iterationCounter++;
+            }
+            lastActiveAgent = agentId;
+            
+            currentStreamingAgent = { id: agentId, name: agentName };
+            agentOutputs.set(agentId, { 
+              id: agentId, 
+              name: agentName, 
+              content: '',
+              lastSentLength: 0,
+              entryId: `${jobId}-${agentId}-${iterationCounter}-stream`,
+              isSent: false,
+              iteration: iterationCounter
+            });
+            
+            const startMessageKey = `start-${agentId}-${iterationCounter}`;
+            if (!processedMessageIds.has(startMessageKey)) {
+              const startEntry = formatAgentMessage(
+                agentId,
+                agentName,
+                `${agentName}が応答を開始しました...`,
+                iterationCounter,
+                'internal'
+              );
+              agentLogStore.addLogEntry(jobId, startEntry);
+              processedMessageIds.add(startMessageKey);
+            }
+          }
+          
+          // テキストデルタ
+          if (chunk.type === 'tool-call-delta' && currentStreamingAgent && chunk.argsTextDelta) {
+            const agentOutput = agentOutputs.get(currentStreamingAgent.id);
+            if (agentOutput) {
+              agentOutput.content += chunk.argsTextDelta;
+            }
+          }
+          
+          // ツール呼び出し完了
+          if (chunk.type === 'tool-call-streaming-finish' && currentStreamingAgent) {
+            const agentOutput = agentOutputs.get(currentStreamingAgent.id);
+            if (agentOutput && agentOutput.content && !agentOutput.isSent) {
+              console.log(`✅ ${currentStreamingAgent.name}の応答完了 - ${agentOutput.content.length}文字`);
+              
+              const finalEntry = formatAgentMessage(
+                currentStreamingAgent.id,
+                currentStreamingAgent.name,
+                agentOutput.content,
+                agentOutput.iteration,
+                'response'
+              );
+              
+              agentLogStore.addLogEntry(jobId, finalEntry);
+              agentOutput.isSent = true;
+              conversationHistory.push(finalEntry);
+              agentOutputs.delete(currentStreamingAgent.id);
+            }
+            currentStreamingAgent = null;
+          }
+          
+          // 完了イベント
+          if (chunk.type === 'finish') {
+            result = chunk.data || chunk.result;
+            
+            // 未送信の出力を送信
+            for (const [agentId, agentOutput] of agentOutputs.entries()) {
+              if (agentOutput.content && !agentOutput.isSent) {
+                const finalEntry = formatAgentMessage(
+                  agentId,
+                  agentOutput.name,
+                  agentOutput.content,
+                  agentOutput.iteration,
+                  'response'
+                );
+                agentLogStore.addLogEntry(jobId, finalEntry);
+                conversationHistory.push(finalEntry);
+              }
+            }
+          }
+        }
+        
+        // ワークフロー状態を取得
+        if (streamResult.getWorkflowState) {
+          const state = await streamResult.getWorkflowState();
+          if (state?.result) {
+            result = state.result;
+          }
+        }
+      }
+    } else {
+      // 通常のloopメソッドを使用
+      console.log('📌 通常のloopメソッドを使用');
+      result = await agentNetwork.loop(networkPrompt, networkOptions);
+    }
+    
+    console.log(`🎯 NewAgentNetwork実行完了`);
+    
+    const endTime = Date.now();
+    const executionTime = ((endTime - startTime) / 1000).toFixed(2);
+    
+    // 実行サマリーを作成
+    const executionSummary = {
+      totalIterations: conversationHistory.length || 3,
+      agentsInvolved: ['ceo-agent', 'manager-agent', 'worker-agent'],
+      executionTime: `${executionTime}s`,
+    };
+    
+    // ログストアのジョブを完了としてマーク
+    agentLogStore.completeJob(jobId, executionSummary);
+    
+    // 結果を整形
+    let finalResult = result?.result?.text || result?.text || result;
+    
+    // スライド生成タスクの特別処理
+    if (inputData.taskType === 'slide-generation') {
+      const workerResponse = conversationHistory.find(entry => 
+        entry.agentId === 'worker' && 
+        entry.message.includes('<!DOCTYPE html>')
+      );
+      
+      if (workerResponse) {
+        let htmlCode = workerResponse.message;
+        
+        // HTMLコードが途中で切れている場合の対処
+        if (!htmlCode.includes('</html>')) {
+          console.warn('⚠️ HTMLコードが途中で切れています。補完を試みます。');
+          
+          if (!htmlCode.includes('class="navigation"')) {
+            const navigationHtml = `
+        <div class="navigation">
+            <button class="nav-btn" onclick="previousSlide()">← 前へ</button>
+            <button class="nav-btn" onclick="nextSlide()">次へ →</button>
+        </div>
+    </div>
+
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+        
+        document.getElementById('total-slides').textContent = totalSlides;
+        
+        function showSlide(n) {
+            slides[currentSlide].classList.remove('active');
+            currentSlide = (n + totalSlides) % totalSlides;
+            slides[currentSlide].classList.add('active');
+            document.getElementById('current-slide').textContent = currentSlide + 1;
+        }
+        
+        function nextSlide() {
+            showSlide(currentSlide + 1);
+        }
+        
+        function previousSlide() {
+            showSlide(currentSlide - 1);
+        }
+        
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight') nextSlide();
+            if (e.key === 'ArrowLeft') previousSlide();
+        });
+    </script>
+</body>
+</html>`;
+            htmlCode += navigationHtml;
+          } else {
+            htmlCode += '\n</body>\n</html>';
+          }
+        }
+        
+        finalResult = {
+          htmlCode: htmlCode,
+          topic: (inputData.taskParameters as { topic?: string })?.topic || 'Untitled',
+          slideCount: (inputData.taskParameters as { pages?: number; slideCount?: number })?.pages || 
+                      (inputData.taskParameters as { pages?: number; slideCount?: number })?.slideCount || 10,
+          style: (inputData.taskParameters as { style?: string })?.style || 'modern',
+          generationTime: Date.now() - startTime
+        };
+      }
+    }
+    
+    const outputData = {
+      success: true,
+      taskType: inputData.taskType,
+      result: finalResult,
+      executionSummary,
+      conversationHistory,
+    };
+
+    console.log('✅ エージェントネットワーク実行完了:', {
       jobId,
       taskType: inputData.taskType,
+      executionTime: `${executionTime}s`,
       timestamp: new Date().toISOString()
     });
 
     // 結果を保存
     updateJobStatus(jobId, 'completed');
-    storeJobResult(jobId, result, 'agent-network-workflow');
+    storeJobResult(jobId, outputData, 'agent-network');
     console.log('💾 ジョブ結果を保存しました:', jobId);
 
   } catch (error) {
-    console.error('❌ エージェントネットワークワークフローエラー:', error);
+    console.error('❌ エージェントネットワークエラー:', error);
+    
+    const endTime = Date.now();
+    const executionTime = ((endTime - startTime) / 1000).toFixed(2);
+    
+    // ログストアのジョブを失敗としてマーク
+    agentLogStore.failJob(jobId, error instanceof Error ? error.message : 'Unknown error');
     
     // エラー時もステータスを保存
     updateJobStatus(jobId, 'failed', {
       error: error instanceof Error ? error.message : 'Unknown error'
     });
+    
+    const outputData = {
+      success: false,
+      taskType: inputData.taskType,
+      result: null,
+      executionSummary: {
+        totalIterations: 0,
+        agentsInvolved: [],
+        executionTime: `${executionTime}s`,
+      },
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    };
+    
+    storeJobResult(jobId, outputData, 'agent-network');
   }
 };
 
@@ -129,11 +480,11 @@ export const agentNetworkTool = createTool({
     // ジョブを初期化
     initializeJob(jobId);
 
-    // バックグラウンドでワークフローを実行
+    // バックグラウンドでエージェントネットワークを実行
     setTimeout(() => {
       // 動的インポートで循環依存を回避
       import('../index').then(({ mastra: mastraInstance }) => {
-        executeAgentNetworkWorkflow(mastraInstance, jobId, {
+        executeAgentNetwork(mastraInstance, jobId, {
           jobId,
           taskType,
           taskDescription,

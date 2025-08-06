@@ -21,6 +21,7 @@ Next.js 15とMastraフレームワークで構築された高度なマルチモ�
 
 - **マルチモデル対応**: Claude Sonnet 4、OpenAI o3、Gemini 2.5 Flashをシームレスに切り替え
 - **階層型エージェントネットワーク**: 複雑なタスク委譲のためのCEO-Manager-Workerパターン
+- **簡素化されたアーキテクチャ**: ワークフロー層を削除し、エージェントネットワークを直接ツールとして実装
 - **非同期処理**: リアルタイムステータス追跡機能を持つノンブロッキングジョブシステム
 - **豊富な機能**: Web検索、天気情報、スライド生成など
 - **エンタープライズ機能**: 認証、スレッドベースメモリ、構造化ログ
@@ -33,19 +34,21 @@ Next.js 15とMastraフレームワークで構築された高度なマルチモ�
 - **Gemini 2.5 Flash** (Google): 思考プロセスを可視化した高速レスポンス
 - チャットUIでの動的モデル選択（ドロップダウンメニュー）
 
-### 🏗️ 階層型エージェントネットワーク
-- **実行フロー**: Agent Network Tool → agent-network-workflow → NewAgentNetwork
+### 🏗️ 階層型エージェントネットワーク（簡素化版）
+- **実行フロー**: General Agent → Agent Network Tool → NewAgentNetwork（直接実行）
 - **CEOエージェント**: 戦略的タスク指示と高レベル計画（タスクごとに1回応答）
 - **Managerエージェント**: タスク分解と運用調整
 - **Workerエージェント**: 専門ツールを使用した効率的なタスク実行
 - **協調メカニズム**: 最大10回の反復でエージェント間が自律的に連携
 - **リアルタイム監視**: エージェント間の会話をSSE（Server-Sent Events）で即時配信
+- **ワークフロー層の削除**: より効率的な直接ツール実装
 
 ### ⚡ 非同期ジョブシステム
 - ツールは即座にジョブIDを返却（< 100ms）
-- バックグラウンドワークフロー実行
+- バックグラウンドでのエージェントネットワーク実行
 - リアルタイムステータス追跡: `queued → running → completed/failed`
-- 結果は`.job-results`ディレクトリに保存
+- 結果は`.job-results/{jobId}.json`に保存
+- メモリ内ログストアによる効率的なログ管理
 
 ### 🔍 高度な機能
 - **Web検索**: Brave検索とExa MCP統合による強力な検索
@@ -63,20 +66,22 @@ Next.js 15とMastraフレームワークで構築された高度なマルチモ�
 
 ## 🏛️ アーキテクチャ
 
+### 簡素化されたアーキテクチャ（v3.0）
+
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   チャットUI    │     │   APIルート     │     │  Mastraコア     │
 │                 │     │                 │     │                 │
 │ • モデル選択    │────▶│ • /api/chat     │────▶│ • エージェント  │
 │ • ストリーミング│     │ • /api/job-*    │     │ • ツール        │
-│ • スレッドメモリ│     │ • 認証MW        │     │ • ワークフロー  │
+│ • スレッドメモリ│     │ • 認証MW        │     │ （ワークフロー削除）│
 └─────────────────┘     └─────────────────┘     └─────────────────┘
                                 │                         │
                                 ▼                         ▼
                         ┌─────────────────┐     ┌─────────────────┐
-                        │ ジョブシステム   │     │ エージェント    │
-                        │                 │     │ ネットワーク    │
-                        │ • 即座にID返却  │────▶│ • ワークフロー  │
+                        │ ジョブシステム   │     │ Agent Network   │
+                        │                 │     │     Tool        │
+                        │ • 即座にID返却  │────▶│ • 直接実行      │
                         │ • 非同期実行    │     │ • NewAgentNetwork│
                         │ • 結果保存      │     │ • エージェント協調│
                         └─────────────────┘     └─────────────────┘
@@ -89,7 +94,8 @@ Next.js 15とMastraフレームワークで構築された高度なマルチモ�
 ├── app/                    # Next.js App Router
 │   ├── api/               # APIエンドポイント
 │   │   ├── chat/         # メインチャットエンドポイント
-│   │   └── job-result/   # ジョブ結果取得
+│   │   ├── job-result/   # ジョブ結果取得
+│   │   └── agent-logs/   # エージェントログ（履歴＆ストリーミング）
 │   ├── auth/             # 認証ページ
 │   └── protected/        # 保護されたルート
 │       └── chat/         # チャットインターフェース
@@ -98,15 +104,17 @@ Next.js 15とMastraフレームワークで構築された高度なマルチモ�
 ├── src/mastra/           # Mastra設定
 │   ├── agents/           # AIエージェント
 │   │   └── network/      # CEO、Manager、Worker
-│   ├── tools/            # Mastraツール
-│   │   └── delegation/   # ネットワーク委譲ツール
-│   ├── workflows/        # バックグラウンドワークフロー
-│   └── utils/            # ユーティリティ
-│       ├── agent-logger.ts      # エージェント通信ログ
-│       └── agent-log-store.ts   # ログストア管理
+│   ├── tools/            # Mastraツール（直接実装）
+│   │   ├── agent-network-tool.ts  # エージェントネットワーク直接実装
+│   │   ├── job-status-tool.ts     # ジョブ管理
+│   │   └── slide-preview-tool.ts  # スライドプレビュー
+│   ├── utils/            # ユーティリティ
+│   │   ├── agent-log-store.ts   # インメモリログストア
+│   │   └── tool-event-wrapper.ts # イベントラッパー
+│   └── index.ts          # Mastra設定（ワークフロー削除）
 ├── lib/                  # 共有ライブラリ
 ├── .job-results/         # 非同期ジョブ結果
-└── .agent-network-logs/  # エージェント会話ログ
+└── .agent-network-logs/  # エージェント会話ログ（廃止予定）
 ```
 
 ## 🚀 クイックスタート
@@ -147,6 +155,10 @@ Next.js 15とMastraフレームワークで構築された高度なマルチモ�
    
    # 検索統合
    EXA_API_KEY=your_exa_key
+   
+   # デバッグ（オプション）
+   LOG_LEVEL=debug
+   AGENT_NETWORK_DEBUG=true
    ```
 
 4. **開発サーバーを起動**
@@ -161,9 +173,9 @@ Next.js 15とMastraフレームワークで構築された高度なマルチモ�
 
 ## 🤝 エージェントネットワークシステム
 
-### ネットワークアーキテクチャ
+### ネットワークアーキテクチャ（簡素化版）
 
-プラットフォームは洗練されたCEO-Manager-Workerパターンを実装：
+プラットフォームは洗練されたCEO-Manager-Workerパターンを実装（ワークフロー層なし）：
 
 ```
 ユーザーリクエスト
@@ -175,10 +187,7 @@ General Agent
 Agent Network Tool（ジョブID即座返却）
      │
      ▼（バックグラウンド実行）
-agent-network-workflow
-     │
-     ▼
-NewAgentNetwork作成
+NewAgentNetwork作成（直接）
      │ • CEOエージェント（デフォルト）
      │ • Managerエージェント
      │ • Workerエージェント
@@ -200,20 +209,19 @@ NewAgentNetwork作成
          • 結果をManagerへ報告
 ```
 
-### タスクフロー
+### タスクフロー（簡素化版）
 
 1. **ユーザーリクエスト**: チャットUI経由でGeneral Agentに送信
 2. **タスク分析**: General Agentがタスクタイプとパラメータを決定
 3. **ジョブ登録**: Agent Network Toolが即座にジョブIDを返却（< 100ms）
-4. **ワークフロー起動**: バックグラウンドでagent-network-workflowが実行
-5. **ネットワーク作成**: NewAgentNetworkインスタンスが3つのエージェントで構成
-6. **協調実行**: 
+4. **直接実行**: バックグラウンドでNewAgentNetworkインスタンスを直接作成・実行
+5. **協調実行**: 
    - CEOエージェントがタスクを受け取り戦略を立案
    - 必要に応じてManagerエージェントに委譲
    - Managerがタスクを分解してWorkerに割り当て
    - Workerが実際のツールを使用して実行
    - 結果が階層を通じて集約される
-7. **結果保存**: ワークフロー完了後、結果が`.job-results`ディレクトリに保存
+6. **結果保存**: 完了後、結果が`.job-results/{jobId}.json`に保存
 
 ### タスク構造の例
 
@@ -238,11 +246,10 @@ NewAgentNetwork作成
 ### Claude Sonnet 4（デフォルト）
 - **プロバイダー**: Anthropic
 - **モデルID**: `claude-sonnet-4-20250514`
-- **最適な用途**: 複雑な推論、分析、創造的タスク
+- **最適な用途**: 複雑な推論、分析、創造的タスク、日本語処理
 - **使用場所**: 
   - General Agent（デフォルト）
   - ネットワーク内の全エージェント（CEO、Manager、Worker）
-  - レガシーエージェント（weather-agent、workflow-agent、workflow-search-agent）
 
 ### OpenAI o3
 - **プロバイダー**: OpenAI
@@ -280,11 +287,26 @@ NewAgentNetwork作成
 **レスポンス:**
 ```json
 {
+  "jobId": "agent-network-slide-generation-1234567890-abc123",
+  "workflowId": "agent-network",  // ツール識別子（ワークフローではない）
   "status": "completed",
   "result": {
-    "data": "...",
-    "metadata": { ... }
-  }
+    "success": true,
+    "taskType": "slide-generation",
+    "result": {
+      "htmlCode": "<!DOCTYPE html>...",
+      "topic": "AI Advances",
+      "slideCount": 10,
+      "style": "modern",
+      "generationTime": 15234
+    },
+    "executionSummary": {
+      "totalIterations": 5,
+      "agentsInvolved": ["ceo-agent", "manager-agent", "worker-agent"],
+      "executionTime": "15.23s"
+    }
+  },
+  "completedAt": "2024-01-15T10:30:45.123Z"
 }
 ```
 
@@ -356,7 +378,7 @@ npm run lint       # ESLintを実行
 
 ### 開発のヒント
 
-- **CLAUDE.md**: プロジェクト固有の開発ガイドラインを参照
+- **CLAUDE.md**: プロジェクト固有の詳細な開発ガイドラインを参照
 - **TypeScript**: Strict modeが有効、`@/*`パスエイリアスを使用
 - **コンポーネント**: shadcn/ui（New Yorkスタイル）を使用
 - **スタイリング**: Tailwind CSS with CSS変数
@@ -365,15 +387,16 @@ npm run lint       # ESLintを実行
 
 #### 新しいツールを追加
 1. `/src/mastra/tools/`にツールを作成
-2. ジョブキューイングパターンを実装
-3. `/src/mastra/index.ts`に登録
+2. ジョブキューイングパターンを実装（< 100ms応答）
+3. `/src/mastra/index.ts`のツールオブジェクトに登録（ワークフローは不要）
 4. 関連するエージェントに追加
+5. 循環依存がある場合は動的インポートを使用
 
-#### 新しいワークフローを追加
-1. `/src/mastra/workflows/`にワークフローを作成
-2. Zodスキーマでステップを定義
-3. Mastra設定に登録
-4. 対応するツールを作成
+#### 新しいエージェントを追加
+1. `/src/mastra/agents/`にエージェントファイルを作成
+2. インストラクション、モデル、利用可能なツールを定義
+3. `/src/mastra/index.ts`に登録
+4. エージェントネットワーク階層への追加を検討
 
 #### エージェントの動作を変更
 1. `/src/mastra/agents/`のエージェントファイルを編集
@@ -394,7 +417,7 @@ storage: new LibSQLStore({
 環境変数で設定：
 ```env
 LOG_LEVEL=debug  # または info, warn, error
-AGENT_LOG_LEVEL=debug  # エージェント専用ログレベル
+AGENT_NETWORK_DEBUG=true  # エージェントネットワークの詳細デバッグ
 ```
 
 ### モデル設定
@@ -403,10 +426,10 @@ AGENT_LOG_LEVEL=debug  # エージェント専用ログレベル
 - `/src/mastra/agents/network/`: 各ネットワークエージェント
 
 ### エージェントログ設定
-- **ログ保存先**: `.agent-network-logs/`ディレクトリ
-- **ファイル形式**: `agent-conversation-{timestamp}.json`
+- **インメモリストア**: EventEmitterベースの効率的なログ管理
 - **最大ログ数**: ジョブあたり1000件（設定可能）
 - **自動クリーンアップ**: 24時間以上経過したログを自動削除
+- **ファイルログ**: `.agent-network-logs/`（廃止予定）
 
 ## 🔧 トラブルシューティング
 
@@ -434,6 +457,7 @@ AGENT_LOG_LEVEL=debug  # エージェント専用ログレベル
 5. **重複ログの問題**
    - ページをリロードして再試行
    - キャッシュをクリア
+   - イベントリスナーの重複を確認
 
 ### デバッグモード
 
@@ -444,8 +468,12 @@ logger: new PinoLogger({
 })
 ```
 
+```env
+AGENT_NETWORK_DEBUG=true
+```
+
 エージェントログの詳細確認：
-- `.agent-network-logs/`ディレクトリのJSONファイルを確認
+- インメモリストアの状態を確認
 - `/api/agent-logs/[jobId]`エンドポイントで履歴を取得
 - リアルタイムログビューアでSSE接続状態を監視
 
@@ -463,6 +491,13 @@ logger: new PinoLogger({
 MIT License
 
 ## 🎨 最近の更新
+
+### v3.0.0 - アーキテクチャの簡素化
+- 🏗️ ワークフロー層を削除し、エージェントネットワークを直接ツールとして実装
+- ⚡ パフォーマンス向上：不要な抽象化層を削除
+- 📦 コードベースの簡素化：927行のワークフローコードを削除
+- 🔧 Agent Network Toolの直接実装（425行）
+- 📝 CLAUDE.mdとREADME.mdを新アーキテクチャに合わせて更新
 
 ### v2.0.0 - エージェントログビューアとUI改善
 - ✨ リアルタイムエージェント会話監視機能を追加

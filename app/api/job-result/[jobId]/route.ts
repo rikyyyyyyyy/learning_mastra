@@ -31,19 +31,15 @@ export async function GET(
     let slideResult = jobResult.result;
     let isSlideGenerationJob = false;
     
-    // agent-networkワークフロー経由のスライド生成の場合
-    if (jobResult.workflowId === 'agent-network-workflow' && 
+    // agent-networkツール経由のスライド生成の場合
+    if (jobResult.workflowId === 'agent-network' && 
              slideResult && typeof slideResult === 'object' &&
-             'steps' in slideResult && 
-             slideResult.steps && typeof slideResult.steps === 'object' &&
-             'agent-network-execution' in slideResult.steps) {
-      const executionStep = slideResult.steps['agent-network-execution'] as { 
-        output?: { taskType?: string; result?: unknown } 
-      };
-      if (executionStep.output?.taskType === 'slide-generation') {
+             'taskType' in slideResult) {
+      const networkOutput = slideResult as { taskType?: string; result?: unknown };
+      if (networkOutput.taskType === 'slide-generation') {
         isSlideGenerationJob = true;
-        // agent-networkワークフローの結果から実際のスライド結果を取得
-        slideResult = executionStep.output.result;
+        // agent-networkツールの結果から実際のスライド結果を取得
+        slideResult = networkOutput.result;
       }
     }
     

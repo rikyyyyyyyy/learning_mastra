@@ -2,8 +2,6 @@
 import { Mastra } from '@mastra/core/mastra';
 import { PinoLogger } from '@mastra/loggers';
 import { LibSQLStore } from '@mastra/libsql';
-// New unified workflow
-import { agentNetworkWorkflow } from './workflows/agent-network-workflow';
 import { generalAgent } from './agents/general-agent';
 import { workflowAgent } from './agents/workflow-agent';
 import { workflowSearchAgent } from './agents/workflow-search-agent';
@@ -13,10 +11,7 @@ import { managerAgent } from './agents/network/manager-agent';
 import { workerAgent } from './agents/network/worker-agent';
 
 export const mastra = new Mastra({
-  workflows: { 
-    // New unified workflow
-    'agent-network-workflow': agentNetworkWorkflow,
-  },
+  workflows: {},
   agents: { 
     generalAgent,
     workflowAgent,

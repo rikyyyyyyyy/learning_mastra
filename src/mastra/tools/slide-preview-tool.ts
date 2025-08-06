@@ -30,7 +30,7 @@ export const slidePreviewTool = createTool({
     }
     
     // ワークフローがagent-networkでない場合
-    if (jobResult.workflowId !== 'agent-network-workflow') {
+    if (jobResult.workflowId !== 'agent-network') {
       return {
         jobId,
         previewReady: false,
@@ -41,14 +41,11 @@ export const slidePreviewTool = createTool({
     // スライド生成結果の存在確認
     let slideResult = jobResult.result;
     
-    // agent-networkワークフローの場合、結果の構造が異なる
-    if (jobResult.workflowId === 'agent-network-workflow' && 
+    // agent-networkツールの場合、結果の構造が異なる
+    if (jobResult.workflowId === 'agent-network' && 
         slideResult && typeof slideResult === 'object' && 
-        'steps' in slideResult && 
-        slideResult.steps && typeof slideResult.steps === 'object' &&
-        'agent-network-execution' in slideResult.steps) {
-      const executionStep = slideResult.steps['agent-network-execution'] as { output?: { taskType?: string; result?: unknown } };
-      const networkOutput = executionStep.output;
+        'taskType' in slideResult) {
+      const networkOutput = slideResult as { taskType?: string; result?: unknown };
       
       // タスクタイプがslide-generationであることを確認
       if (networkOutput?.taskType !== 'slide-generation') {
@@ -59,7 +56,7 @@ export const slidePreviewTool = createTool({
         };
       }
       
-      // agent-networkワークフローの結果から実際のスライド結果を取得
+      // agent-networkツールの結果から実際のスライド結果を取得
       slideResult = networkOutput.result;
     }
     
