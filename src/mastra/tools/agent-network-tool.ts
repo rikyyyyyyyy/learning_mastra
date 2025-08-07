@@ -78,7 +78,8 @@ const executeAgentNetwork = async (
         'worker': workerAgent as Agent,
       },
       defaultAgent: ceoAgent as Agent,
-      memory: memory as MastraMemory | undefined,
+      // memoryはDynamicArgument型（関数）を要求される環境があるため、関数ラッパをanyで適合させる
+      memory: (memory ? (((_args: any) => memory) as any) : undefined),
     });
 
     // タスクコンテキストを準備
@@ -185,6 +186,97 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
               'internal'
             );
             agentLogStore.addLogEntry(jobId, routingEntry);
+
+            // ルーティング先をアクティブエージェントとして設定（text-deltaのみのケースに備える）
+            try {
+              let agentId = 'unknown';
+              let agentName = 'Unknown Agent';
+              const to = String(routingInfo.toAgent || '').toLowerCase();
+              if (to.includes('ceo')) { agentId = 'ceo'; agentName = 'CEO Agent'; }
+              else if (to.includes('manager')) { agentId = 'manager'; agentName = 'Manager Agent'; }
+              else if (to.includes('worker')) { agentId = 'worker'; agentName = 'Worker Agent'; }
+
+              if (agentId !== 'unknown') {
+                if (lastActiveAgent && lastActiveAgent !== agentId) {
+                  iterationCounter++;
+                }
+                lastActiveAgent = agentId;
+
+                currentStreamingAgent = { id: agentId, name: agentName };
+                if (!agentOutputs.has(agentId)) {
+                  agentOutputs.set(agentId, {
+                    id: agentId,
+                    name: agentName,
+                    content: '',
+                    lastSentLength: 0,
+                    entryId: `${jobId}-${agentId}-${iterationCounter}-stream`,
+                    isSent: false,
+                    iteration: iterationCounter,
+                  });
+                  // 内部開始メッセージ（重複防止）
+                  const startKey = `start-${agentId}-${iterationCounter}`;
+                  if (!processedMessageIds.has(startKey)) {
+                    const startEntry = formatAgentMessage(
+                      agentId,
+                      agentName,
+                      `${agentName}が応答を開始しました...`,
+                      iterationCounter,
+                      'internal'
+                    );
+                    agentLogStore.addLogEntry(jobId, startEntry);
+                    processedMessageIds.add(startKey);
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('agent-routing handling failed:', e);
+            }
+          }
+          
+          // フォールバック: 非ストリーミング環境の一般的なツール呼び出しイベント
+          if (chunk.type === 'tool-call') {
+            let agentName = 'Unknown Agent';
+            let agentId = 'unknown';
+            
+            const guessFrom = (v?: string) => {
+              const s = (v || '').toLowerCase();
+              if (s.includes('ceo')) return { id: 'ceo', name: 'CEO Agent' } as const;
+              if (s.includes('manager')) return { id: 'manager', name: 'Manager Agent' } as const;
+              if (s.includes('worker')) return { id: 'worker', name: 'Worker Agent' } as const;
+              return null;
+            };
+            const g = guessFrom(chunk.name) || guessFrom(chunk.toolName);
+            if (g) { agentId = g.id; agentName = g.name; }
+            else if (chunk.name) { agentName = chunk.name; agentId = chunk.name.toLowerCase().replace(/\s+/g, '-'); }
+            
+            if (lastActiveAgent && lastActiveAgent !== agentId) {
+              iterationCounter++;
+            }
+            lastActiveAgent = agentId;
+            
+            currentStreamingAgent = { id: agentId, name: agentName };
+            agentOutputs.set(agentId, {
+              id: agentId,
+              name: agentName,
+              content: '',
+              lastSentLength: 0,
+              entryId: `${jobId}-${agentId}-${iterationCounter}-stream`,
+              isSent: false,
+              iteration: iterationCounter,
+            });
+            
+            const startKey = `start-${agentId}-${iterationCounter}`;
+            if (!processedMessageIds.has(startKey)) {
+              const startEntry = formatAgentMessage(
+                agentId,
+                agentName,
+                `${agentName}が応答を開始しました...`,
+                iterationCounter,
+                'internal'
+              );
+              agentLogStore.addLogEntry(jobId, startEntry);
+              processedMessageIds.add(startKey);
+            }
           }
           
           // ツール呼び出し開始
@@ -245,6 +337,13 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
               agentOutput.content += chunk.argsTextDelta;
             }
           }
+          // 追加: agentからの直接text-delta
+          if (chunk.type === 'text-delta' && currentStreamingAgent && chunk.textDelta) {
+            const agentOutput = agentOutputs.get(currentStreamingAgent.id);
+            if (agentOutput) {
+              agentOutput.content += chunk.textDelta;
+            }
+          }
           
           // ツール呼び出し完了
           if (chunk.type === 'tool-call-streaming-finish' && currentStreamingAgent) {
@@ -285,6 +384,110 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                 agentLogStore.addLogEntry(jobId, finalEntry);
                 conversationHistory.push(finalEntry);
               }
+            }
+          }
+
+          // ステップ結果（agent-step）でのフォールバック送信
+          if (chunk.type === 'step-result') {
+            try {
+              const output = (chunk as any).payload?.output;
+              let agentId = 'unknown';
+              let agentName = 'Unknown Agent';
+              const rid = String(output?.resourceId || '').toLowerCase();
+              if (rid.includes('ceo')) { agentId = 'ceo'; agentName = 'CEO Agent'; }
+              else if (rid.includes('manager')) { agentId = 'manager'; agentName = 'Manager Agent'; }
+              else if (rid.includes('worker')) { agentId = 'worker'; agentName = 'Worker Agent'; }
+
+              if (agentId !== 'unknown') {
+                const agentOutput = agentOutputs.get(agentId);
+                if (agentOutput && agentOutput.content && !agentOutput.isSent) {
+                  const finalEntry = formatAgentMessage(
+                    agentId,
+                    agentName,
+                    agentOutput.content,
+                    agentOutput.iteration,
+                    'response'
+                  );
+                  agentLogStore.addLogEntry(jobId, finalEntry);
+                  conversationHistory.push(finalEntry);
+                  agentOutputs.delete(agentId);
+                  if (currentStreamingAgent?.id === agentId) {
+                    currentStreamingAgent = null;
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('step-result fallback failed:', e);
+            }
+          }
+
+          // 汎用エージェントメッセージのフォールバック
+          if (chunk.type === 'agent-message' || chunk.type === 'message') {
+            try {
+              const data: any = (chunk as any).data || chunk;
+              const content: string | undefined = data?.content || data?.text;
+              if (content) {
+                let agentId = 'system';
+                let agentName = 'System';
+                const raw = String(data?.agentId || data?.name || '').toLowerCase();
+                if (raw.includes('ceo')) { agentId = 'ceo'; agentName = 'CEO Agent'; }
+                else if (raw.includes('manager')) { agentId = 'manager'; agentName = 'Manager Agent'; }
+                else if (raw.includes('worker')) { agentId = 'worker'; agentName = 'Worker Agent'; }
+
+                const entry = formatAgentMessage(
+                  agentId,
+                  agentName,
+                  content,
+                  iterationCounter,
+                  'response'
+                );
+                agentLogStore.addLogEntry(jobId, entry);
+                conversationHistory.push(entry);
+              }
+            } catch (e) {
+              console.warn('agent-message fallback failed:', e);
+            }
+          }
+
+          // フォールバック: ツール結果イベント
+          if (chunk.type === 'tool-result' && chunk.result) {
+            let agentId = currentStreamingAgent?.id || 'unknown';
+            let agentName = currentStreamingAgent?.name || 'Unknown Agent';
+            const guessFrom = (v?: string) => {
+              const s = (v || '').toLowerCase();
+              if (s.includes('ceo')) return { id: 'ceo', name: 'CEO Agent' } as const;
+              if (s.includes('manager')) return { id: 'manager', name: 'Manager Agent' } as const;
+              if (s.includes('worker')) return { id: 'worker', name: 'Worker Agent' } as const;
+              return null;
+            };
+            const g = guessFrom(chunk.name) || guessFrom(chunk.toolName) || guessFrom((chunk.result as any)?.resourceId);
+            if (g) { agentId = g.id; agentName = g.name; }
+            
+            const agentOutput = currentStreamingAgent ? agentOutputs.get(currentStreamingAgent.id) : undefined;
+            if (agentOutput && agentOutput.content) {
+              const finalEntry = formatAgentMessage(
+                agentId,
+                agentName,
+                agentOutput.content,
+                agentOutput.iteration,
+                'response'
+              );
+              agentLogStore.addLogEntry(jobId, finalEntry);
+              conversationHistory.push(finalEntry);
+              agentOutputs.delete(agentId);
+              currentStreamingAgent = null;
+            } else {
+              const resultText = typeof chunk.result === 'string' ? chunk.result : JSON.stringify(chunk.result);
+              const finalEntry = formatAgentMessage(
+                agentId,
+                agentName,
+                resultText,
+                iterationCounter,
+                'response'
+              );
+              agentLogStore.addLogEntry(jobId, finalEntry);
+              conversationHistory.push(finalEntry);
+              currentStreamingAgent = null;
             }
           }
         }
@@ -476,6 +679,16 @@ export const agentNetworkTool = createTool({
 
     // ジョブを初期化
     initializeJob(jobId);
+
+    // SSE側での404を避けるため、バックグラウンド起動前にログジョブも先行作成
+    try {
+      const exists = agentLogStore.getJobLog(jobId);
+      if (!exists) {
+        agentLogStore.createJob(jobId, taskType);
+      }
+    } catch (e) {
+      console.warn('Pre-create agentLogStore job failed:', e);
+    }
 
     // バックグラウンドでエージェントネットワークを実行
     setTimeout(() => {
