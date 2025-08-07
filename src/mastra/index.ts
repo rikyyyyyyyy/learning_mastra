@@ -3,8 +3,6 @@ import { Mastra } from '@mastra/core/mastra';
 import { PinoLogger } from '@mastra/loggers';
 import { LibSQLStore } from '@mastra/libsql';
 import { generalAgent } from './agents/general-agent';
-import { workflowAgent } from './agents/workflow-agent';
-import { workflowSearchAgent } from './agents/workflow-search-agent';
 // New network agents
 import { ceoAgent } from './agents/network/ceo-agent';
 import { managerAgent } from './agents/network/manager-agent';
@@ -14,8 +12,6 @@ export const mastra = new Mastra({
   workflows: {},
   agents: { 
     generalAgent,
-    workflowAgent,
-    workflowSearchAgent,
     // New network agents
     'ceo-agent': ceoAgent,
     'manager-agent': managerAgent,
@@ -32,4 +28,4 @@ export const mastra = new Mastra({
 });
 
 // エージェントをエクスポート
-export { generalAgent, workflowAgent, workflowSearchAgent, ceoAgent, managerAgent, workerAgent };
+export { generalAgent, ceoAgent, managerAgent, workerAgent };

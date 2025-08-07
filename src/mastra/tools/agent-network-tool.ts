@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
 import { NewAgentNetwork } from '@mastra/core/network/vNext';
 import { anthropic } from '@ai-sdk/anthropic';
+import { Agent } from '@mastra/core/agent';
+import { MastraMemory } from '@mastra/core/memory';
 import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
 
 // バックグラウンドでエージェントネットワークを実行
@@ -34,7 +36,7 @@ const executeAgentNetwork = async (
 
     // Mastraインスタンスが利用可能か確認
     const mastraTyped = mastraInstance as { 
-      getAgent: (id: string) => unknown;
+      getAgent: (id: string) => Agent | undefined;
       getMemory: () => unknown;
     };
     if (!mastraTyped) {
@@ -45,18 +47,13 @@ const executeAgentNetwork = async (
     updateJobStatus(jobId, 'running');
 
     // エージェントを取得
-    const ceoAgentOriginal = mastraTyped.getAgent('ceo-agent');
-    const managerAgentOriginal = mastraTyped.getAgent('manager-agent');
-    const workerAgentOriginal = mastraTyped.getAgent('worker-agent');
+    const ceoAgent = mastraTyped.getAgent('ceo-agent');
+    const managerAgent = mastraTyped.getAgent('manager-agent');
+    const workerAgent = mastraTyped.getAgent('worker-agent');
 
-    if (!ceoAgentOriginal || !managerAgentOriginal || !workerAgentOriginal) {
+    if (!ceoAgent || !managerAgent || !workerAgent) {
       throw new Error('必要なエージェントが見つかりません');
     }
-    
-    // エージェントをそのまま使用
-    const ceoAgent = ceoAgentOriginal;
-    const managerAgent = managerAgentOriginal;
-    const workerAgent = workerAgentOriginal;
 
     // メモリ設定を準備
     const resourceId = (runtimeContext as { get: (key: string) => unknown })?.get?.('resourceId') as string | undefined;
@@ -76,12 +73,12 @@ const executeAgentNetwork = async (
       instructions: `Coordinate task execution through CEO-Manager-Worker hierarchy. The network automatically routes between agents based on the conversation flow.`,
       model: anthropic('claude-sonnet-4-20250514'),
       agents: {
-        'ceo': ceoAgent,
-        'manager': managerAgent,
-        'worker': workerAgent,
+        'ceo': ceoAgent as Agent,
+        'manager': managerAgent as Agent,
+        'worker': workerAgent as Agent,
       },
-      defaultAgent: ceoAgent,
-      memory: memory,
+      defaultAgent: ceoAgent as Agent,
+      memory: memory as MastraMemory | undefined,
     });
 
     // タスクコンテキストを準備
