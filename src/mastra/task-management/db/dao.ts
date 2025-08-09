@@ -1,9 +1,8 @@
 import { 
   NetworkTask, 
-  TaskArtifact, 
-  TaskCommunication, 
-  TaskDependency,
-  TaskStatus 
+  NetworkDirective,
+  TaskStatus,
+  DirectiveStatus 
 } from './schema';
 import { getTaskDB } from './migrations';
 
@@ -53,7 +52,7 @@ abstract class BaseDAO {
   }
 }
 
-// Network Tasks DAO
+// Network Tasks DAO (拡張版)
 export class NetworkTaskDAO extends BaseDAO {
   constructor() {
     super('network_tasks');
@@ -69,21 +68,25 @@ export class NetworkTaskDAO extends BaseDAO {
 
     const query = `
       INSERT INTO network_tasks (
-        task_id, parent_job_id, network_type, status, task_type,
-        task_description, task_parameters, created_by, priority,
-        created_at, updated_at, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        task_id, network_id, parent_job_id, network_type, status, task_type,
+        task_description, task_parameters, task_result, progress,
+        created_by, assigned_to, priority, created_at, updated_at, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     await this.executeRun(query, [
       fullTask.task_id,
+      fullTask.network_id,
       fullTask.parent_job_id || null,
       fullTask.network_type,
       fullTask.status,
       fullTask.task_type,
       fullTask.task_description,
       JSON.stringify(fullTask.task_parameters || {}),
+      JSON.stringify(fullTask.task_result || null),
+      fullTask.progress,
       fullTask.created_by,
+      fullTask.assigned_to || null,
       fullTask.priority,
       fullTask.created_at,
       fullTask.updated_at,
@@ -102,6 +105,13 @@ export class NetworkTaskDAO extends BaseDAO {
     return this.parseTask(result as Record<string, unknown>);
   }
 
+  async findByNetworkId(networkId: string): Promise<NetworkTask[]> {
+    const query = 'SELECT * FROM network_tasks WHERE network_id = ? ORDER BY created_at DESC';
+    const results = await this.execute(query, [networkId]) as Record<string, unknown>[];
+    
+    return results.map((r) => this.parseTask(r));
+  }
+
   async findByStatus(status: TaskStatus): Promise<NetworkTask[]> {
     const query = 'SELECT * FROM network_tasks WHERE status = ? ORDER BY created_at DESC';
     const results = await this.execute(query, [status]) as Record<string, unknown>[];
@@ -109,20 +119,16 @@ export class NetworkTaskDAO extends BaseDAO {
     return results.map((r) => this.parseTask(r));
   }
 
-  async findByCreator(createdBy: string): Promise<NetworkTask[]> {
-    const query = 'SELECT * FROM network_tasks WHERE created_by = ? ORDER BY created_at DESC';
-    const results = await this.execute(query, [createdBy]) as Record<string, unknown>[];
+  async findByNetworkAndStatus(networkId: string, status: TaskStatus): Promise<NetworkTask[]> {
+    const query = 'SELECT * FROM network_tasks WHERE network_id = ? AND status = ? ORDER BY priority DESC, created_at ASC';
+    const results = await this.execute(query, [networkId, status]) as Record<string, unknown>[];
     
     return results.map((r) => this.parseTask(r));
   }
 
-  async findRunningTasks(): Promise<NetworkTask[]> {
-    const query = `
-      SELECT * FROM network_tasks 
-      WHERE status IN ('running', 'queued') 
-      ORDER BY priority DESC, created_at ASC
-    `;
-    const results = await this.execute(query) as Record<string, unknown>[];
+  async findByAssignedWorker(workerId: string): Promise<NetworkTask[]> {
+    const query = 'SELECT * FROM network_tasks WHERE assigned_to = ? AND status IN (\'queued\', \'running\') ORDER BY priority DESC, created_at ASC';
+    const results = await this.execute(query, [workerId]) as Record<string, unknown>[];
     
     return results.map((r) => this.parseTask(r));
   }
@@ -139,27 +145,112 @@ export class NetworkTaskDAO extends BaseDAO {
     await this.executeRun(query, [status, now, status, now, taskId]);
   }
 
-  async updateMetadata(taskId: string, metadata: Record<string, unknown>): Promise<void> {
+  async updateProgress(taskId: string, progress: number): Promise<void> {
     const now = new Date().toISOString();
     const query = `
       UPDATE network_tasks 
-      SET metadata = ?, updated_at = ?
+      SET progress = ?, updated_at = ?
       WHERE task_id = ?
     `;
     
-    await this.executeRun(query, [JSON.stringify(metadata), now, taskId]);
+    await this.executeRun(query, [Math.min(100, Math.max(0, progress)), now, taskId]);
+  }
+
+  async updateResult(taskId: string, result: unknown): Promise<void> {
+    const now = new Date().toISOString();
+    const query = `
+      UPDATE network_tasks 
+      SET task_result = ?, updated_at = ?
+      WHERE task_id = ?
+    `;
+    
+    await this.executeRun(query, [JSON.stringify(result), now, taskId]);
+  }
+
+  async updateStatusAndResult(taskId: string, status: TaskStatus, result: unknown, progress: number = 100): Promise<void> {
+    const now = new Date().toISOString();
+    const query = `
+      UPDATE network_tasks 
+      SET status = ?, task_result = ?, progress = ?, updated_at = ?, 
+          completed_at = CASE WHEN ? IN ('completed', 'failed') THEN ? ELSE completed_at END
+      WHERE task_id = ?
+    `;
+    
+    await this.executeRun(query, [
+      status, 
+      JSON.stringify(result), 
+      progress,
+      now, 
+      status, 
+      now, 
+      taskId
+    ]);
+  }
+
+  async assignWorker(taskId: string, workerId: string): Promise<void> {
+    const now = new Date().toISOString();
+    const query = `
+      UPDATE network_tasks 
+      SET assigned_to = ?, updated_at = ?
+      WHERE task_id = ?
+    `;
+    
+    await this.executeRun(query, [workerId, now, taskId]);
+  }
+
+  async getNetworkSummary(networkId: string): Promise<{
+    total: number;
+    queued: number;
+    running: number;
+    completed: number;
+    failed: number;
+    averageProgress: number;
+  }> {
+    const query = `
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+        AVG(progress) as averageProgress
+      FROM network_tasks
+      WHERE network_id = ?
+    `;
+    
+    const result = await this.executeOne(query, [networkId]) as {
+      total: number;
+      queued: number;
+      running: number;
+      completed: number;
+      failed: number;
+      averageProgress: number;
+    } | null;
+    
+    return {
+      total: result?.total || 0,
+      queued: result?.queued || 0,
+      running: result?.running || 0,
+      completed: result?.completed || 0,
+      failed: result?.failed || 0,
+      averageProgress: result?.averageProgress || 0,
+    };
   }
 
   private parseTask(row: Record<string, unknown>): NetworkTask {
     return {
       task_id: row.task_id as string,
+      network_id: row.network_id as string,
       parent_job_id: row.parent_job_id as string | undefined,
       network_type: row.network_type as string,
       status: row.status as TaskStatus,
       task_type: row.task_type as string,
       task_description: row.task_description as string,
       task_parameters: row.task_parameters ? JSON.parse(row.task_parameters as string) : undefined,
+      task_result: row.task_result ? JSON.parse(row.task_result as string) : undefined,
+      progress: row.progress as number,
       created_by: row.created_by as string,
+      assigned_to: row.assigned_to as string | undefined,
       priority: row.priority as 'low' | 'medium' | 'high',
       created_at: row.created_at as string,
       updated_at: row.updated_at as string,
@@ -169,250 +260,147 @@ export class NetworkTaskDAO extends BaseDAO {
   }
 }
 
-// Task Artifacts DAO
-export class TaskArtifactDAO extends BaseDAO {
+// Network Directives DAO (新規)
+export class NetworkDirectiveDAO extends BaseDAO {
   constructor() {
-    super('task_artifacts');
+    super('network_directives');
   }
 
-  async create(artifact: Omit<TaskArtifact, 'created_at' | 'updated_at'>): Promise<TaskArtifact> {
+  async create(directive: Omit<NetworkDirective, 'created_at' | 'updated_at'>): Promise<NetworkDirective> {
     const now = new Date().toISOString();
-    const fullArtifact: TaskArtifact = {
-      ...artifact,
+    const fullDirective: NetworkDirective = {
+      ...directive,
       created_at: now,
       updated_at: now,
     };
 
     const query = `
-      INSERT INTO task_artifacts (
-        artifact_id, task_id, artifact_type, content,
-        metadata, is_public, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO network_directives (
+        directive_id, network_id, directive_content, directive_type,
+        source, status, created_at, updated_at, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     await this.executeRun(query, [
-      fullArtifact.artifact_id,
-      fullArtifact.task_id,
-      fullArtifact.artifact_type,
-      fullArtifact.content,
-      JSON.stringify(fullArtifact.metadata || {}),
-      fullArtifact.is_public ? 1 : 0,
-      fullArtifact.created_at,
-      fullArtifact.updated_at
+      fullDirective.directive_id,
+      fullDirective.network_id,
+      fullDirective.directive_content,
+      fullDirective.directive_type,
+      fullDirective.source,
+      fullDirective.status,
+      fullDirective.created_at,
+      fullDirective.updated_at,
+      JSON.stringify(fullDirective.metadata || {})
     ]);
 
-    return fullArtifact;
+    return fullDirective;
   }
 
-  async findById(artifactId: string): Promise<TaskArtifact | null> {
-    const query = 'SELECT * FROM task_artifacts WHERE artifact_id = ?';
-    const result = await this.executeOne(query, [artifactId]);
+  async findById(directiveId: string): Promise<NetworkDirective | null> {
+    const query = 'SELECT * FROM network_directives WHERE directive_id = ?';
+    const result = await this.executeOne(query, [directiveId]);
     
     if (!result) return null;
     
-    return this.parseArtifact(result as Record<string, unknown>);
+    return this.parseDirective(result as Record<string, unknown>);
   }
 
-  async findByTaskId(taskId: string): Promise<TaskArtifact[]> {
-    const query = 'SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY created_at DESC';
-    const results = await this.execute(query, [taskId]) as Record<string, unknown>[];
+  async findByNetworkId(networkId: string): Promise<NetworkDirective[]> {
+    const query = 'SELECT * FROM network_directives WHERE network_id = ? ORDER BY created_at DESC';
+    const results = await this.execute(query, [networkId]) as Record<string, unknown>[];
     
-    return results.map((r) => this.parseArtifact(r));
+    return results.map((r) => this.parseDirective(r));
   }
 
-  async findPublicByType(artifactType: string): Promise<TaskArtifact[]> {
-    const query = `
-      SELECT * FROM task_artifacts 
-      WHERE artifact_type = ? AND is_public = 1 
-      ORDER BY created_at DESC
-    `;
-    const results = await this.execute(query, [artifactType]) as Record<string, unknown>[];
+  async findPendingByNetworkId(networkId: string): Promise<NetworkDirective[]> {
+    const query = 'SELECT * FROM network_directives WHERE network_id = ? AND status = \'pending\' ORDER BY created_at ASC';
+    const results = await this.execute(query, [networkId]) as Record<string, unknown>[];
     
-    return results.map((r) => this.parseArtifact(r));
+    return results.map((r) => this.parseDirective(r));
   }
 
-  async updateContent(artifactId: string, content: string): Promise<void> {
+  async findUnacknowledged(): Promise<NetworkDirective[]> {
+    const query = 'SELECT * FROM network_directives WHERE status = \'pending\' ORDER BY created_at ASC';
+    const results = await this.execute(query, []) as Record<string, unknown>[];
+    
+    return results.map((r) => this.parseDirective(r));
+  }
+
+  async updateStatus(directiveId: string, status: DirectiveStatus): Promise<void> {
     const now = new Date().toISOString();
-    const query = `
-      UPDATE task_artifacts 
-      SET content = ?, updated_at = ?
-      WHERE artifact_id = ?
+    const statusField = status === 'acknowledged' ? 'acknowledged_at' : 
+                       status === 'applied' ? 'applied_at' : null;
+    
+    let query = `
+      UPDATE network_directives 
+      SET status = ?, updated_at = ?
     `;
     
-    await this.executeRun(query, [content, now, artifactId]);
-  }
-
-  private parseArtifact(row: Record<string, unknown>): TaskArtifact {
-    return {
-      artifact_id: row.artifact_id as string,
-      task_id: row.task_id as string,
-      artifact_type: row.artifact_type as string,
-      content: row.content as string,
-      metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
-      is_public: row.is_public === 1,
-      created_at: row.created_at as string,
-      updated_at: row.updated_at as string,
-    };
-  }
-}
-
-// Task Communications DAO
-export class TaskCommunicationDAO extends BaseDAO {
-  constructor() {
-    super('task_communications');
-  }
-
-  async create(message: Omit<TaskCommunication, 'created_at'>): Promise<TaskCommunication> {
-    const now = new Date().toISOString();
-    const fullMessage: TaskCommunication = {
-      ...message,
-      created_at: now,
-    };
-
-    const query = `
-      INSERT INTO task_communications (
-        message_id, from_task_id, to_task_id, from_agent_id,
-        message_type, content, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    await this.executeRun(query, [
-      fullMessage.message_id,
-      fullMessage.from_task_id || null,
-      fullMessage.to_task_id,
-      fullMessage.from_agent_id,
-      fullMessage.message_type,
-      fullMessage.content,
-      fullMessage.created_at
-    ]);
-
-    return fullMessage;
-  }
-
-  async findUnreadByTaskId(taskId: string): Promise<TaskCommunication[]> {
-    const query = `
-      SELECT * FROM task_communications 
-      WHERE to_task_id = ? AND read_at IS NULL 
-      ORDER BY created_at ASC
-    `;
-    const results = await this.execute(query, [taskId]) as TaskCommunication[];
+    const params: unknown[] = [status, now];
     
-    return results;
-  }
-
-  async findByTaskId(taskId: string, limit: number = 50): Promise<TaskCommunication[]> {
-    const query = `
-      SELECT * FROM task_communications 
-      WHERE to_task_id = ? OR from_task_id = ?
-      ORDER BY created_at DESC
-      LIMIT ?
-    `;
-    const results = await this.execute(query, [taskId, taskId, limit]) as TaskCommunication[];
+    if (statusField) {
+      query += `, ${statusField} = ?`;
+      params.push(now);
+    }
     
-    return results;
-  }
-
-  async markAsRead(messageId: string): Promise<void> {
-    const now = new Date().toISOString();
-    const query = `
-      UPDATE task_communications 
-      SET read_at = ?
-      WHERE message_id = ?
-    `;
+    query += ' WHERE directive_id = ?';
+    params.push(directiveId);
     
-    await this.executeRun(query, [now, messageId]);
+    await this.executeRun(query, params);
   }
 
-  async markAllAsReadForTask(taskId: string): Promise<void> {
-    const now = new Date().toISOString();
-    const query = `
-      UPDATE task_communications 
-      SET read_at = ?
-      WHERE to_task_id = ? AND read_at IS NULL
-    `;
-    
-    await this.executeRun(query, [now, taskId]);
-  }
-}
-
-// Task Dependencies DAO
-export class TaskDependencyDAO extends BaseDAO {
-  constructor() {
-    super('task_dependencies');
+  async acknowledge(directiveId: string): Promise<void> {
+    await this.updateStatus(directiveId, 'acknowledged');
   }
 
-  async create(dependency: Omit<TaskDependency, 'created_at'>): Promise<TaskDependency> {
-    const now = new Date().toISOString();
-    const fullDependency: TaskDependency = {
-      ...dependency,
-      created_at: now,
-    };
-
-    const query = `
-      INSERT INTO task_dependencies (
-        dependency_id, task_id, depends_on_task_id,
-        dependency_type, created_at
-      ) VALUES (?, ?, ?, ?, ?)
-    `;
-
-    await this.executeRun(query, [
-      fullDependency.dependency_id,
-      fullDependency.task_id,
-      fullDependency.depends_on_task_id,
-      fullDependency.dependency_type,
-      fullDependency.created_at
-    ]);
-
-    return fullDependency;
+  async apply(directiveId: string): Promise<void> {
+    await this.updateStatus(directiveId, 'applied');
   }
 
-  async findByTaskId(taskId: string): Promise<TaskDependency[]> {
-    const query = 'SELECT * FROM task_dependencies WHERE task_id = ?';
-    const results = await this.execute(query, [taskId]) as TaskDependency[];
-    
-    return results;
+  async reject(directiveId: string): Promise<void> {
+    await this.updateStatus(directiveId, 'rejected');
   }
 
-  async findDependentTasks(taskId: string): Promise<TaskDependency[]> {
-    const query = 'SELECT * FROM task_dependencies WHERE depends_on_task_id = ?';
-    const results = await this.execute(query, [taskId]) as TaskDependency[];
-    
-    return results;
-  }
-
-  async checkDependenciesSatisfied(taskId: string): Promise<boolean> {
+  async hasUnacknowledgedDirectives(networkId: string): Promise<boolean> {
     const query = `
       SELECT COUNT(*) as count
-      FROM task_dependencies td
-      JOIN network_tasks nt ON td.depends_on_task_id = nt.task_id
-      WHERE td.task_id = ? 
-        AND td.dependency_type = 'requires_completion'
-        AND nt.status != 'completed'
+      FROM network_directives
+      WHERE network_id = ? AND status = 'pending'
     `;
     
-    const result = await this.executeOne(query, [taskId]) as { count: number };
-    return result.count === 0;
+    const result = await this.executeOne(query, [networkId]) as { count: number };
+    return result.count > 0;
+  }
+
+  private parseDirective(row: Record<string, unknown>): NetworkDirective {
+    return {
+      directive_id: row.directive_id as string,
+      network_id: row.network_id as string,
+      directive_content: row.directive_content as string,
+      directive_type: row.directive_type as 'policy_update' | 'task_addition' | 'priority_change' | 'abort' | 'other',
+      source: row.source as string,
+      status: row.status as DirectiveStatus,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+      acknowledged_at: row.acknowledged_at as string | undefined,
+      applied_at: row.applied_at as string | undefined,
+      metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
+    };
   }
 }
 
 // Export singleton instances
 let taskDAO: NetworkTaskDAO | null = null;
-let artifactDAO: TaskArtifactDAO | null = null;
-let communicationDAO: TaskCommunicationDAO | null = null;
-let dependencyDAO: TaskDependencyDAO | null = null;
+let directiveDAO: NetworkDirectiveDAO | null = null;
 
 export function getDAOs() {
   if (!taskDAO) {
     taskDAO = new NetworkTaskDAO();
-    artifactDAO = new TaskArtifactDAO();
-    communicationDAO = new TaskCommunicationDAO();
-    dependencyDAO = new TaskDependencyDAO();
+    directiveDAO = new NetworkDirectiveDAO();
   }
   
   return {
     tasks: taskDAO!,
-    artifacts: artifactDAO!,
-    communications: communicationDAO!,
-    dependencies: dependencyDAO!,
+    directives: directiveDAO!,
   };
 }

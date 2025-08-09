@@ -30,12 +30,10 @@ export class TaskManagementDB {
   }
 
   private async runMigrations(): Promise<void> {
-    // Create tables in order due to foreign key constraints
+    // Create tables in order
     const migrations = [
       { name: 'network_tasks', sql: SQL_SCHEMAS.network_tasks },
-      { name: 'task_artifacts', sql: SQL_SCHEMAS.task_artifacts },
-      { name: 'task_communications', sql: SQL_SCHEMAS.task_communications },
-      { name: 'task_dependencies', sql: SQL_SCHEMAS.task_dependencies },
+      { name: 'network_directives', sql: SQL_SCHEMAS.network_directives },
     ];
 
     for (const migration of migrations) {
@@ -68,9 +66,7 @@ export class TaskManagementDB {
   // Clean up method for testing
   async cleanup(): Promise<void> {
     try {
-      await this.db.execute('DROP TABLE IF EXISTS task_dependencies');
-      await this.db.execute('DROP TABLE IF EXISTS task_communications');
-      await this.db.execute('DROP TABLE IF EXISTS task_artifacts');
+      await this.db.execute('DROP TABLE IF EXISTS network_directives');
       await this.db.execute('DROP TABLE IF EXISTS network_tasks');
       console.log('🧹 Task management tables cleaned up');
     } catch (error) {

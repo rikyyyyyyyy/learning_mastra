@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Loader2, MessageSquarePlus, Eye, X, ChevronDown, FileText, MessageCircle } from "lucide-react";
+import { Send, Bot, User, Loader2, MessageSquarePlus, Eye, X, ChevronDown, FileText, MessageCircle, Database } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +10,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { DBViewerDialog } from "@/components/db-viewers/db-viewer-dialog";
 
 interface Message {
   id: string;
@@ -124,6 +125,7 @@ export default function ChatPage() {
   const logScrollRef = useRef<HTMLDivElement>(null);
   const connectingJobs = useRef<Set<string>>(new Set());
   const [isComposing, setIsComposing] = useState(false);
+  const [showDBViewer, setShowDBViewer] = useState(false);
   
   // threadIdを管理（セッション中は同じthreadIdを使用）
   const threadIdRef = useRef<string>(`thread-${Date.now()}`);
@@ -959,6 +961,16 @@ export default function ChatPage() {
               )}
             </div>
             
+            {/* DBビューアボタン */}
+            <button
+              onClick={() => setShowDBViewer(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-xl transition-all duration-200 shadow-sm hover:shadow border"
+              title="データベースビューア"
+            >
+              <Database className="w-4 h-4" />
+              <span className="text-sm">DB</span>
+            </button>
+            
             {/* エージェントログビューアーボタン */}
             <Dialog open={showAgentLogs} onOpenChange={(open) => {
               setShowAgentLogs(open);
@@ -1407,6 +1419,12 @@ export default function ChatPage() {
         </div>
       </div>
     )}
+    
+    {/* DBビューアダイアログ */}
+    <DBViewerDialog 
+      open={showDBViewer} 
+      onOpenChange={setShowDBViewer}
+    />
   </div>
   );
 }

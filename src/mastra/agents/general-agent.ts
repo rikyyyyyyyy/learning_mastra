@@ -9,9 +9,7 @@ import { jobStatusTool } from '../tools/job-status-tool';
 import { jobResultTool } from '../tools/job-result-tool';
 // Task management tools
 import { taskRegistryTool } from '../task-management/tools/task-registry-tool';
-import { artifactStoreTool } from '../task-management/tools/artifact-store-tool';
-import { taskCommunicationTool } from '../task-management/tools/task-communication-tool';
-import { taskDiscoveryTool } from '../task-management/tools/task-discovery-tool';
+import { directiveManagementTool } from '../task-management/tools/directive-management-tool';
 import { LanguageModel } from 'ai';
 import { getAgentPrompt } from '../prompts/agent-prompts';
 
@@ -53,9 +51,7 @@ export function createGeneralAgent(modelType: string = 'claude-sonnet-4'): Agent
       jobResultTool,
       // Task management tools
       taskRegistryTool,
-      artifactStoreTool,
-      taskCommunicationTool,
-      taskDiscoveryTool,
+      directiveManagementTool,
     },
     memory: sharedMemory,
   });

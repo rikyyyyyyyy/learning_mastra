@@ -2,9 +2,8 @@ import { Agent } from '@mastra/core/agent';
 import { anthropic } from '@ai-sdk/anthropic';
 import { sharedMemory } from '../../shared-memory';
 // Task management tools
-import { taskRegistryTool } from '../../task-management/tools/task-registry-tool';
-import { artifactStoreTool } from '../../task-management/tools/artifact-store-tool';
-import { taskDiscoveryTool } from '../../task-management/tools/task-discovery-tool';
+import { taskManagementTool } from '../../task-management/tools/task-management-tool';
+import { directiveManagementTool } from '../../task-management/tools/directive-management-tool';
 import { getAgentPrompt } from '../../prompts/agent-prompts';
 
 export const managerAgent = new Agent({
@@ -12,9 +11,8 @@ export const managerAgent = new Agent({
   instructions: getAgentPrompt('MANAGER'),
   model: anthropic('claude-sonnet-4-20250514'),
   tools: {
-    taskRegistryTool,
-    artifactStoreTool,
-    taskDiscoveryTool,
+    taskManagementTool,
+    directiveManagementTool,
   },
   memory: sharedMemory,
 });

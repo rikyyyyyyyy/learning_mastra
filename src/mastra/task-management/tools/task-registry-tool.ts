@@ -58,12 +58,14 @@ export const taskRegistryTool = createTool({
           
           const newTask = await daos.tasks.create({
             task_id: newTaskId,
+            network_id: taskData.parentJobId || newTaskId, // Use parentJobId as network_id or taskId itself
             parent_job_id: taskData.parentJobId,
             network_type: taskData.networkType,
             status: 'queued',
             task_type: taskData.taskType,
             task_description: taskData.taskDescription,
             task_parameters: taskData.taskParameters,
+            progress: 0,
             created_by: taskData.createdBy,
             priority: taskData.priority,
             metadata: taskData.metadata,
@@ -133,12 +135,14 @@ export const taskRegistryTool = createTool({
         }
 
         case 'list_running': {
-          const runningTasks = await daos.tasks.findRunningTasks();
+          const runningTasks = await daos.tasks.findByStatus('running');
+          const queuedTasks = await daos.tasks.findByStatus('queued');
+          const allTasks = [...runningTasks, ...queuedTasks];
           
           return {
             success: true,
             action,
-            tasks: runningTasks.map(t => ({
+            tasks: allTasks.map(t => ({
               taskId: t.task_id,
               status: t.status,
               taskType: t.task_type,
@@ -146,7 +150,7 @@ export const taskRegistryTool = createTool({
               createdBy: t.created_by,
               createdAt: t.created_at,
             })),
-            message: `Found ${runningTasks.length} running/queued tasks`,
+            message: `Found ${allTasks.length} running/queued tasks`,
           };
         }
 
@@ -170,22 +174,12 @@ export const taskRegistryTool = createTool({
             };
           }
 
-          // Also get related artifacts and recent communications
-          const artifacts = await daos.artifacts.findByTaskId(taskId);
-          const communications = await daos.communications.findByTaskId(taskId, 10);
-          const dependencies = await daos.dependencies.findByTaskId(taskId);
-
           return {
             success: true,
             action,
             taskId,
-            task: {
-              ...task,
-              artifacts: artifacts.length,
-              recentCommunications: communications.length,
-              dependencies: dependencies.length,
-            },
-            message: `Retrieved task ${taskId} with related data`,
+            task,
+            message: `Retrieved task ${taskId}`,
           };
         }
 

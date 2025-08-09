@@ -43,12 +43,14 @@ const executeAgentNetwork = async (
       
       await daos.tasks.create({
         task_id: jobId,
+        network_id: jobId, // Use jobId as network_id
         parent_job_id: inputData.jobId,
         network_type: 'CEO-Manager-Worker',
         status: 'queued',
         task_type: inputData.taskType,
         task_description: inputData.taskDescription,
         task_parameters: inputData.taskParameters,
+        progress: 0,
         created_by: createdBy,
         priority: inputData.context?.priority || 'medium',
         metadata: {
@@ -656,23 +658,15 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       const daos = getDAOs();
       await daos.tasks.updateStatus(jobId, 'completed');
       
-      // 成果物として結果を保存
+      // 成果物として結果を保存（現在は無効化）
+      // TODO: artifactの保存を別の方法で実装
+      /*
       if (inputData.taskType === 'slide-generation' && finalResult && typeof finalResult === 'object' && 'htmlCode' in finalResult) {
         const slideResult = finalResult as { htmlCode: string; topic?: string; slideCount?: number; style?: string };
-        await daos.artifacts.create({
-          artifact_id: `artifact-${jobId}-html`,
-          task_id: jobId,
-          artifact_type: 'html',
-          content: slideResult.htmlCode,
-          metadata: {
-            topic: slideResult.topic,
-            slideCount: slideResult.slideCount,
-            style: slideResult.style,
-          },
-          is_public: true,
-        });
-        console.log('📦 スライドHTMLを成果物として保存');
+        // artifact保存処理をここに実装
+        console.log('📦 スライドHTMLの成果物保存はスキップ（将来実装予定）');
       }
+      */
     } catch (dbError) {
       console.warn('⚠️ タスク完了処理でエラー:', dbError);
     }
