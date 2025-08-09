@@ -4,7 +4,6 @@ import { initializeJob, updateJobStatus, storeJobResult } from './job-status-too
 import { NewAgentNetwork } from '@mastra/core/network/vNext';
 import { anthropic } from '@ai-sdk/anthropic';
 import { Agent } from '@mastra/core/agent';
-import { MastraMemory } from '@mastra/core/memory';
 import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
 
 // バックグラウンドでエージェントネットワークを実行
@@ -34,6 +33,36 @@ const executeAgentNetwork = async (
       timestamp: new Date().toISOString()
     });
 
+    // タスク管理システムにタスクを登録
+    try {
+      const { getDAOs } = await import('../task-management/db/dao');
+      const daos = getDAOs();
+      
+      // 現在のエージェント名を取得（runtimeContextから）
+      const createdBy = (runtimeContext as { get: (key: string) => unknown })?.get?.('agentName') as string || 'general-agent';
+      
+      await daos.tasks.create({
+        task_id: jobId,
+        parent_job_id: inputData.jobId,
+        network_type: 'CEO-Manager-Worker',
+        status: 'queued',
+        task_type: inputData.taskType,
+        task_description: inputData.taskDescription,
+        task_parameters: inputData.taskParameters,
+        created_by: createdBy,
+        priority: inputData.context?.priority || 'medium',
+        metadata: {
+          expectedOutput: inputData.context?.expectedOutput,
+          constraints: inputData.context?.constraints,
+          additionalInstructions: inputData.context?.additionalInstructions,
+        },
+      });
+      
+      console.log('✅ タスクをタスク管理DBに登録:', jobId);
+    } catch (dbError) {
+      console.warn('⚠️ タスク管理DBへの登録に失敗（処理は継続）:', dbError);
+    }
+
     // Mastraインスタンスが利用可能か確認
     const mastraTyped = mastraInstance as { 
       getAgent: (id: string) => Agent | undefined;
@@ -45,6 +74,15 @@ const executeAgentNetwork = async (
 
     // ジョブステータスを実行中に更新
     updateJobStatus(jobId, 'running');
+    
+    // タスク管理DBのステータスも更新
+    try {
+      const { getDAOs } = await import('../task-management/db/dao');
+      const daos = getDAOs();
+      await daos.tasks.updateStatus(jobId, 'running');
+    } catch (dbError) {
+      console.warn('⚠️ タスクステータスの更新に失敗:', dbError);
+    }
 
     // エージェントを取得
     const ceoAgent = mastraTyped.getAgent('ceo-agent');
@@ -78,8 +116,8 @@ const executeAgentNetwork = async (
         'worker': workerAgent as Agent,
       },
       defaultAgent: ceoAgent as Agent,
-      // memoryはDynamicArgument型（関数）を要求される環境があるため、関数ラッパをanyで適合させる
-      memory: (memory ? (((_args: any) => memory) as any) : undefined),
+      // memoryはDynamicArgument型（関数）を要求される環境があるため、関数ラッパで適合させる
+      memory: (memory ? (() => memory) : undefined) as undefined,
     });
 
     // タスクコンテキストを準備
@@ -390,7 +428,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
           // ステップ結果（agent-step）でのフォールバック送信
           if (chunk.type === 'step-result') {
             try {
-              const output = (chunk as any).payload?.output;
+              const output = (chunk as { payload?: { output?: unknown } }).payload?.output as Record<string, unknown> | undefined;
               let agentId = 'unknown';
               let agentName = 'Unknown Agent';
               const rid = String(output?.resourceId || '').toLowerCase();
@@ -424,12 +462,12 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
           // 汎用エージェントメッセージのフォールバック
           if (chunk.type === 'agent-message' || chunk.type === 'message') {
             try {
-              const data: any = (chunk as any).data || chunk;
-              const content: string | undefined = data?.content || data?.text;
+              const data = (chunk as { data?: unknown }).data || chunk;
+              const content = (data as Record<string, unknown>)?.content as string || (data as Record<string, unknown>)?.text as string;
               if (content) {
                 let agentId = 'system';
                 let agentName = 'System';
-                const raw = String(data?.agentId || data?.name || '').toLowerCase();
+                const raw = String((data as Record<string, unknown>)?.agentId || (data as Record<string, unknown>)?.name || '').toLowerCase();
                 if (raw.includes('ceo')) { agentId = 'ceo'; agentName = 'CEO Agent'; }
                 else if (raw.includes('manager')) { agentId = 'manager'; agentName = 'Manager Agent'; }
                 else if (raw.includes('worker')) { agentId = 'worker'; agentName = 'Worker Agent'; }
@@ -460,7 +498,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
               if (s.includes('worker')) return { id: 'worker', name: 'Worker Agent' } as const;
               return null;
             };
-            const g = guessFrom(chunk.name) || guessFrom(chunk.toolName) || guessFrom((chunk.result as any)?.resourceId);
+            const g = guessFrom(chunk.name) || guessFrom(chunk.toolName) || guessFrom((chunk.result as Record<string, unknown>)?.resourceId as string);
             if (g) { agentId = g.id; agentName = g.name; }
             
             const agentOutput = currentStreamingAgent ? agentOutputs.get(currentStreamingAgent.id) : undefined;
@@ -611,6 +649,33 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
     updateJobStatus(jobId, 'completed');
     storeJobResult(jobId, outputData, 'agent-network');
     console.log('💾 ジョブ結果を保存しました:', jobId);
+    
+    // タスク管理DBのステータスも更新
+    try {
+      const { getDAOs } = await import('../task-management/db/dao');
+      const daos = getDAOs();
+      await daos.tasks.updateStatus(jobId, 'completed');
+      
+      // 成果物として結果を保存
+      if (inputData.taskType === 'slide-generation' && finalResult && typeof finalResult === 'object' && 'htmlCode' in finalResult) {
+        const slideResult = finalResult as { htmlCode: string; topic?: string; slideCount?: number; style?: string };
+        await daos.artifacts.create({
+          artifact_id: `artifact-${jobId}-html`,
+          task_id: jobId,
+          artifact_type: 'html',
+          content: slideResult.htmlCode,
+          metadata: {
+            topic: slideResult.topic,
+            slideCount: slideResult.slideCount,
+            style: slideResult.style,
+          },
+          is_public: true,
+        });
+        console.log('📦 スライドHTMLを成果物として保存');
+      }
+    } catch (dbError) {
+      console.warn('⚠️ タスク完了処理でエラー:', dbError);
+    }
 
   } catch (error) {
     console.error('❌ エージェントネットワークエラー:', error);
@@ -639,6 +704,15 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
     };
     
     storeJobResult(jobId, outputData, 'agent-network');
+    
+    // タスク管理DBのステータスも更新
+    try {
+      const { getDAOs } = await import('../task-management/db/dao');
+      const daos = getDAOs();
+      await daos.tasks.updateStatus(jobId, 'failed');
+    } catch (dbError) {
+      console.warn('⚠️ タスク失敗ステータスの更新エラー:', dbError);
+    }
   }
 };
 
