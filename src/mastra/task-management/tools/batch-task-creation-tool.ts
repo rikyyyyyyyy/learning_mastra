@@ -1,0 +1,156 @@
+import { createTool } from '@mastra/core/tools';
+import { z } from 'zod';
+import { getDAOs } from '../db/dao';
+import { NetworkTask } from '../db/schema';
+
+// バッチタスク作成ツール - Manager用の一括タスク作成
+export const batchTaskCreationTool = createTool({
+  id: 'batch-task-creation',
+  description: 'Create multiple tasks at once for a network with dependencies and step ordering',
+  inputSchema: z.object({
+    networkId: z.string().describe('Network ID for the agent network'),
+    parentJobId: z.string().optional().describe('Parent job ID for tracking'),
+    tasks: z.array(z.object({
+      taskType: z.string(),
+      taskDescription: z.string(),
+      taskParameters: z.any().optional(),
+      priority: z.enum(['low', 'medium', 'high']).default('medium'),
+      stepNumber: z.number().optional(),
+      dependsOn: z.array(z.string()).optional(),
+      estimatedTime: z.number().optional().describe('Estimated time in seconds'),
+      metadata: z.record(z.any()).optional(),
+    })).describe('Array of tasks to create'),
+    autoAssign: z.boolean().default(false).describe('Automatically assign workers based on task type'),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    createdTasks: z.array(z.object({
+      taskId: z.string(),
+      taskType: z.string(),
+      stepNumber: z.number().optional(),
+    })).optional(),
+    networkId: z.string(),
+    totalTasks: z.number(),
+    message: z.string(),
+    error: z.string().optional(),
+  }),
+  execute: async ({ context }) => {
+    const startTime = Date.now();
+    
+    try {
+      const { networkId, parentJobId, tasks, autoAssign } = context;
+      const daos = getDAOs();
+      
+      // Ensure response time < 100ms by using setTimeout for actual creation
+      const createdTaskIds: Array<{ taskId: string; taskType: string; stepNumber?: number }> = [];
+      const taskPromises: Promise<void>[] = [];
+      
+      // Prepare task data synchronously
+      const taskDataList = tasks.map((task, index) => {
+        const taskId = `task-${networkId}-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 8)}`;
+        createdTaskIds.push({ 
+          taskId, 
+          taskType: task.taskType,
+          stepNumber: task.stepNumber || index + 1
+        });
+        
+        return {
+          task_id: taskId,
+          network_id: networkId,
+          parent_job_id: parentJobId,
+          network_type: 'CEO-Manager-Worker',
+          status: 'queued' as const,
+          task_type: task.taskType,
+          task_description: task.taskDescription,
+          task_parameters: task.taskParameters,
+          progress: 0,
+          created_by: 'manager-agent',
+          assigned_to: autoAssign ? getWorkerForTaskType(task.taskType) : undefined,
+          priority: task.priority,
+          step_number: task.stepNumber || index + 1,
+          depends_on: task.dependsOn,
+          metadata: {
+            ...task.metadata,
+            estimatedTime: task.estimatedTime,
+            batchCreated: true,
+            batchSize: tasks.length,
+          },
+        };
+      });
+      
+      // Schedule async database operations
+      setTimeout(async () => {
+        try {
+          // Create all tasks in parallel
+          const createPromises = taskDataList.map(taskData => 
+            daos.tasks.create(taskData).catch(err => {
+              console.error(`Failed to create task ${taskData.task_id}:`, err);
+              return null;
+            })
+          );
+          
+          const results = await Promise.all(createPromises);
+          const successCount = results.filter(r => r !== null).length;
+          
+          console.log(`✅ Batch created ${successCount}/${taskDataList.length} tasks for network ${networkId}`);
+          
+          // Update network metadata with task plan
+          const networkSummary = {
+            totalTasks: taskDataList.length,
+            taskPlan: taskDataList.map(t => ({
+              step: t.step_number,
+              type: t.task_type,
+              description: t.task_description,
+              priority: t.priority,
+              dependsOn: t.depends_on,
+            })),
+            createdAt: new Date().toISOString(),
+          };
+          
+          // Store network summary for UI display
+          await daos.tasks.updateNetworkMetadata?.(networkId, networkSummary).catch(err => {
+            console.error('Failed to update network metadata:', err);
+          });
+          
+        } catch (error) {
+          console.error('Batch task creation background error:', error);
+        }
+      }, 0);
+      
+      // Return immediately with task IDs
+      return {
+        success: true,
+        createdTasks: createdTaskIds,
+        networkId,
+        totalTasks: tasks.length,
+        message: `Batch creation initiated for ${tasks.length} tasks in network ${networkId}`,
+      };
+      
+    } catch (error) {
+      console.error('Batch Task Creation Tool error:', error);
+      return {
+        success: false,
+        networkId: context.networkId,
+        totalTasks: 0,
+        message: 'Failed to initiate batch task creation',
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  },
+});
+
+// Helper function to determine worker assignment based on task type
+function getWorkerForTaskType(taskType: string): string | undefined {
+  const taskTypeMapping: Record<string, string> = {
+    'web-search': 'worker-search-agent',
+    'research': 'worker-research-agent',
+    'code-generation': 'worker-code-agent',
+    'slide-generation': 'worker-slide-agent',
+    'analysis': 'worker-analysis-agent',
+    'report': 'worker-report-agent',
+    'data-processing': 'worker-data-agent',
+    'content-creation': 'worker-content-agent',
+  };
+  
+  return taskTypeMapping[taskType.toLowerCase()] || 'worker-agent';
+}

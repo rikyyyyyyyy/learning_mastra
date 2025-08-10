@@ -70,8 +70,9 @@ export class NetworkTaskDAO extends BaseDAO {
       INSERT INTO network_tasks (
         task_id, network_id, parent_job_id, network_type, status, task_type,
         task_description, task_parameters, task_result, progress,
-        created_by, assigned_to, priority, created_at, updated_at, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        created_by, assigned_to, priority, step_number, depends_on, execution_time,
+        created_at, updated_at, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     await this.executeRun(query, [
@@ -88,6 +89,9 @@ export class NetworkTaskDAO extends BaseDAO {
       fullTask.created_by,
       fullTask.assigned_to || null,
       fullTask.priority,
+      fullTask.step_number || null,
+      JSON.stringify(fullTask.depends_on || []),
+      fullTask.execution_time || null,
       fullTask.created_at,
       fullTask.updated_at,
       JSON.stringify(fullTask.metadata || {})
@@ -169,10 +173,19 @@ export class NetworkTaskDAO extends BaseDAO {
 
   async updateStatusAndResult(taskId: string, status: TaskStatus, result: unknown, progress: number = 100): Promise<void> {
     const now = new Date().toISOString();
+    
+    // Get task start time to calculate execution time
+    const task = await this.findById(taskId);
+    let executionTime: number | null = null;
+    if (task && (status === 'completed' || status === 'failed')) {
+      executionTime = Date.now() - new Date(task.created_at).getTime();
+    }
+    
     const query = `
       UPDATE network_tasks 
       SET status = ?, task_result = ?, progress = ?, updated_at = ?, 
-          completed_at = CASE WHEN ? IN ('completed', 'failed') THEN ? ELSE completed_at END
+          completed_at = CASE WHEN ? IN ('completed', 'failed') THEN ? ELSE completed_at END,
+          execution_time = CASE WHEN ? IN ('completed', 'failed') THEN ? ELSE execution_time END
       WHERE task_id = ?
     `;
     
@@ -182,7 +195,9 @@ export class NetworkTaskDAO extends BaseDAO {
       progress,
       now, 
       status, 
-      now, 
+      now,
+      status,
+      executionTime,
       taskId
     ]);
   }
@@ -252,6 +267,9 @@ export class NetworkTaskDAO extends BaseDAO {
       created_by: row.created_by as string,
       assigned_to: row.assigned_to as string | undefined,
       priority: row.priority as 'low' | 'medium' | 'high',
+      step_number: row.step_number as number | undefined,
+      depends_on: row.depends_on ? JSON.parse(row.depends_on as string) : undefined,
+      execution_time: row.execution_time as number | undefined,
       created_at: row.created_at as string,
       updated_at: row.updated_at as string,
       completed_at: row.completed_at as string | undefined,

@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDAOs } from '@/src/mastra/task-management/db/dao';
+import { initializeTaskManagementDB } from '@/src/mastra/task-management/db/migrations';
+
+// Initialize database on first request
+let dbInitialized = false;
+
+async function ensureDBInitialized() {
+  if (!dbInitialized) {
+    await initializeTaskManagementDB(':memory:');
+    dbInitialized = true;
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
+    // Ensure database is initialized
+    await ensureDBInitialized();
+    
     const { searchParams } = new URL(request.url);
     const networkId = searchParams.get('networkId');
     const status = searchParams.get('status');
@@ -32,6 +46,7 @@ export async function GET(request: NextRequest) {
       const completedTasks = await taskDAO.findByStatus('completed');
       const failedTasks = await taskDAO.findByStatus('failed');
       
+      // Combine all tasks, but keep main network tasks for grouping purposes
       tasks = [...allTasks, ...queuedTasks, ...completedTasks.slice(0, 50), ...failedTasks.slice(0, 20)]
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         .slice(offset, offset + limit);

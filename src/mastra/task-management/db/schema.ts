@@ -23,6 +23,9 @@ export const NetworkTaskSchema = z.object({
   created_by: z.string(),
   assigned_to: z.string().optional(), // 担当Worker
   priority: z.enum(['low', 'medium', 'high']).default('medium'),
+  step_number: z.number().optional(), // タスクのステップ番号
+  depends_on: z.array(z.string()).optional(), // 依存タスクID
+  execution_time: z.number().optional(), // 実行時間（ミリ秒）
   created_at: z.string(),
   updated_at: z.string(),
   completed_at: z.string().optional(),
@@ -65,6 +68,9 @@ export const SQL_SCHEMAS = {
       created_by TEXT NOT NULL,
       assigned_to TEXT,
       priority TEXT DEFAULT 'medium' CHECK(priority IN ('low', 'medium', 'high')),
+      step_number INTEGER,
+      depends_on TEXT,
+      execution_time INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       completed_at TEXT,
@@ -75,6 +81,7 @@ export const SQL_SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_network_tasks_parent_job ON network_tasks(parent_job_id);
     CREATE INDEX IF NOT EXISTS idx_network_tasks_created_by ON network_tasks(created_by);
     CREATE INDEX IF NOT EXISTS idx_network_tasks_assigned_to ON network_tasks(assigned_to);
+    CREATE INDEX IF NOT EXISTS idx_network_tasks_step_number ON network_tasks(network_id, step_number);
   `,
   
   network_directives: `

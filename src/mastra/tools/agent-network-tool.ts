@@ -53,7 +53,9 @@ const executeAgentNetwork = async (
         progress: 0,
         created_by: createdBy,
         priority: inputData.context?.priority || 'medium',
+        step_number: undefined, // Explicitly set to undefined to mark as main network task
         metadata: {
+          isNetworkMainTask: true, // Mark this as the main network task
           expectedOutput: inputData.context?.expectedOutput,
           constraints: inputData.context?.constraints,
           additionalInstructions: inputData.context?.additionalInstructions,
@@ -134,6 +136,7 @@ const executeAgentNetwork = async (
 
     const networkPrompt = `
 Execute the following task:
+Network ID: ${jobId}
 Type: ${inputData.taskType}
 Description: ${inputData.taskDescription}
 Parameters: ${JSON.stringify(parsedParameters, null, 2)}
@@ -142,6 +145,8 @@ ${inputData.context?.constraints ? `Constraints: ${JSON.stringify(inputData.cont
 ${inputData.context?.additionalInstructions ? `Additional Instructions: ${inputData.context.additionalInstructions}` : ''}
 
 Priority: ${inputData.context?.priority || 'medium'}
+
+IMPORTANT: When creating tasks in the database, use the Network ID "${jobId}" for all tasks in this network.
 
 As the CEO agent, analyze this task and provide strategic direction. The agent network will automatically route your guidance to the appropriate agents for planning and execution.
 `;

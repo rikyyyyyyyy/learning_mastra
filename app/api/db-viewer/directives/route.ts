@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDAOs } from '@/src/mastra/task-management/db/dao';
+import { initializeTaskManagementDB } from '@/src/mastra/task-management/db/migrations';
+
+// Initialize database on first request
+let dbInitialized = false;
+
+async function ensureDBInitialized() {
+  if (!dbInitialized) {
+    await initializeTaskManagementDB(':memory:');
+    dbInitialized = true;
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
+    // Ensure database is initialized
+    await ensureDBInitialized();
+    
     const { searchParams } = new URL(request.url);
     const networkId = searchParams.get('networkId');
     const status = searchParams.get('status');
