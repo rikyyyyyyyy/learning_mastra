@@ -112,14 +112,60 @@ const executeAgentNetwork = async (
     const agentNetwork = new NewAgentNetwork({
       id: 'task-execution-network',
       name: 'Task Execution Network',
-      instructions: `Coordinate task execution through CEO-Manager-Worker hierarchy. The network automatically routes between agents based on the conversation flow.`,
+      instructions: `
+## エージェントネットワーク実行フロー
+
+このネットワークはCEO-Manager-Workerの3つのエージェントが並列的な役割分担で協働します。
+3者は上下関係ではなく、それぞれが専門的な役割を持つ並列的な関係です。
+
+### 全体の流れ：
+
+1. **開始時（Managerがデフォルト）**
+   - Managerがタスクを受信
+   - CEOに初回方針決定を要請
+
+2. **CEO方針決定**
+   - エージェントネットワーク開始時：全体方針を決定・提示
+   - 追加指令があった時：方針を修正
+   - それ以外の時は応答しない
+
+3. **Manager タスク管理**
+   - CEO方針に基づきタスクを実行可能な小タスクに分解
+   - batchTaskCreationToolでタスクリストをDBに保存
+   - 頻繁に追加指令DBを確認（directiveManagementTool）
+   - Workerに個別タスクを順番に指示
+   - 各タスクの結果をツールでDBに格納
+
+4. **Worker 段階的実行**
+   - Managerが作成したタスクリストに従って実行
+   - 一つのタスクが終わったら必ずManagerに報告
+   - Managerが結果を保存するまで待機
+   - 次のタスクの指示を受けて継続
+
+5. **結果管理と完了**
+   - Managerが各タスクの結果をDBに格納
+   - 全タスク完了後、CEOに最終報告
+   - CEOが最終成果物を承認・納品
+
+### ルーティングルール：
+- Manager → CEO：初回方針要請、追加指令報告、最終報告時
+- CEO → Manager：方針提示後
+- Manager → Worker：個別タスク指示時
+- Worker → Manager：タスク完了報告時（必須）
+
+### 重要なポイント：
+- 各エージェントは並列的な役割分担（上下関係なし）
+- Workerは必ず一つのタスクごとにManagerに報告
+- Managerは頻繁に追加指令を確認
+- 追加指令があればCEOが方針を修正
+`,
       model: anthropic('claude-sonnet-4-20250514'),
       agents: {
         'ceo': ceoAgent as Agent,
         'manager': managerAgent as Agent,
         'worker': workerAgent as Agent,
       },
-      defaultAgent: ceoAgent as Agent,
+      defaultAgent: managerAgent as Agent,
       // memoryはDynamicArgument型（関数）を要求される環境があるため、関数ラッパで適合させる
       memory: (memory ? (() => memory) : undefined) as undefined,
     });

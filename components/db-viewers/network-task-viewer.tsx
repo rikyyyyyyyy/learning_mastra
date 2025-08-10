@@ -493,14 +493,38 @@ export function NetworkTaskViewer() {
                             </div>
                             
                               
-                              {expandedTasks.has(task.task_id) && task.task_result && (
+                              {expandedTasks.has(task.task_id) && (
                                 <div className="mt-3 p-3 bg-muted/50 rounded-lg">
-                                  <div className="font-medium text-sm mb-2">タスク結果:</div>
-                                  <pre className="text-xs bg-background p-2 rounded border overflow-x-auto max-h-48 overflow-y-auto">
-                                    {typeof task.task_result === 'string' 
-                                      ? task.task_result 
-                                      : JSON.stringify(task.task_result, null, 2)}
-                                  </pre>
+                                  {task.task_result ? (
+                                    <>
+                                      <div className="font-medium text-sm mb-2">タスク結果:</div>
+                                      <pre className="text-xs bg-background p-2 rounded border overflow-x-auto max-h-48 overflow-y-auto">
+                                        {typeof task.task_result === 'string' 
+                                          ? task.task_result 
+                                          : JSON.stringify(task.task_result, null, 2)}
+                                      </pre>
+                                    </>
+                                  ) : (
+                                    <div className="text-sm text-muted-foreground">
+                                      {task.status === 'completed' 
+                                        ? '結果が保存されていません' 
+                                        : task.status === 'running'
+                                        ? '実行中...'
+                                        : task.status === 'queued'
+                                        ? '待機中'
+                                        : 'まだ結果がありません'}
+                                    </div>
+                                  )}
+                                  
+                                  {task.metadata && Object.keys(task.metadata).length > 0 && (
+                                    <div className="mt-2">
+                                      <span className="font-medium text-sm">メタデータ:</span>
+                                      <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto">
+                                        {JSON.stringify(task.metadata, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  
                                   {task.depends_on && task.depends_on.length > 0 && (
                                     <div className="mt-2">
                                       <span className="font-medium text-sm">依存タスク:</span>
@@ -509,6 +533,13 @@ export function NetworkTaskViewer() {
                                       </div>
                                     </div>
                                   )}
+                                  
+                                  <div className="mt-2 text-xs text-muted-foreground">
+                                    <div>タスクID: {task.task_id}</div>
+                                    <div>作成者: {task.created_by}</div>
+                                    {task.assigned_to && <div>担当: {task.assigned_to}</div>}
+                                    {task.execution_time && <div>実行時間: {Math.round(task.execution_time / 1000)}秒</div>}
+                                  </div>
                                 </div>
                               )}
                             </div>

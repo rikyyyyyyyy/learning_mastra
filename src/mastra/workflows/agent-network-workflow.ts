@@ -108,7 +108,7 @@ const agentNetworkStep = createStep({
           'manager': managerAgent,
           'worker': workerAgent,
         },
-        defaultAgent: ceoAgent,
+        defaultAgent: managerAgent,
         memory: memory,
       });
 
