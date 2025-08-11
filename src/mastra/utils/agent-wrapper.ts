@@ -61,9 +61,14 @@ export function wrapAgentForLogging(
             
             // テキストチャンクをキャプチャ
             if (chunk.type === 'text-delta') {
-              responseText += chunk.textDelta || '';
+              // AI SDK v5: text-delta は text プロパティ
+              // v4 互換: textDelta もフォールバックで対応
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const delta = (chunk as any).text ?? (chunk as any).textDelta ?? '';
+              responseText += delta;
             } else if (chunk.type === 'text') {
-              responseText += chunk.text || '';
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              responseText += (chunk as any).text ?? '';
             }
           }
           

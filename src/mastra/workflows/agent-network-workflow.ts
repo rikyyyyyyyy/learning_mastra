@@ -552,20 +552,6 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                     const previousLength = agentOutput.content.length;
                     agentOutput.content += chunk.argsTextDelta;
                     console.log(`📊 エージェント出力蓄積中: ${currentStreamingAgent.id} - ${previousLength}文字 → ${agentOutput.content.length}文字`);
-                    console.log(`   内容プレビュー: "${agentOutput.content.substring(agentOutput.content.length - 50)}"`);
-                    
-                    // ストリーミング中は蓄積のみ行い、一切送信しない
-                    // 完了時（tool-call-streaming-finish）に全文をまとめて送信
-                  } else {
-                    console.warn(`⚠️ agentOutputが見つかりません: ${currentStreamingAgent.id}`);
-                    console.warn(`   現在のagentOutputs:`, Array.from(agentOutputs.keys()));
-                  }
-                } else {
-                  if (!currentStreamingAgent) {
-                    console.warn('⚠️ currentStreamingAgentが設定されていません（復元失敗）');
-                  }
-                  if (!chunk.argsTextDelta) {
-                    console.warn('⚠️ chunk.argsTextDeltaが空です');
                   }
                 }
               }
@@ -614,8 +600,6 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                   if (agentOutput) {
                     agentOutput.content += chunk.textDelta;
                     console.log(`📊 text-delta蓄積中: ${currentStreamingAgent.id} - ${agentOutput.content.length}文字`);
-                    
-                    // text-deltaも同様に、ストリーミング中は蓄積のみ行い送信しない
                   }
                 }
               }

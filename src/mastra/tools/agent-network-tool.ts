@@ -473,18 +473,20 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
             }
           }
           
-          // テキストデルタ
-          if (chunk.type === 'tool-call-delta' && currentStreamingAgent && chunk.argsTextDelta) {
+          // テキストデルタ（蓄積のみ。部分送信は行わない）
+          if (chunk.type === 'tool-call-delta' && currentStreamingAgent && (chunk as unknown as { argsTextDelta?: string }).argsTextDelta) {
             const agentOutput = agentOutputs.get(currentStreamingAgent.id);
             if (agentOutput) {
-              agentOutput.content += chunk.argsTextDelta;
+              const argsDelta = (chunk as unknown as { argsTextDelta?: string }).argsTextDelta || '';
+              agentOutput.content += argsDelta;
             }
           }
-          // 追加: agentからの直接text-delta
-          if (chunk.type === 'text-delta' && currentStreamingAgent && chunk.textDelta) {
+          // 追加: agentからの直接text-delta（蓄積のみ。部分送信は行わない）
+          if (chunk.type === 'text-delta' && currentStreamingAgent && ((chunk as unknown as { text?: string, textDelta?: string }).text || (chunk as unknown as { textDelta?: string }).textDelta)) {
             const agentOutput = agentOutputs.get(currentStreamingAgent.id);
             if (agentOutput) {
-              agentOutput.content += chunk.textDelta;
+              const delta = (chunk as unknown as { text?: string, textDelta?: string }).text || (chunk as unknown as { textDelta?: string }).textDelta || '';
+              agentOutput.content += delta;
             }
           }
           
@@ -717,6 +719,8 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
     const errorResult = {
       success: false,
       taskType: inputData.taskType,
+      // フロントの履歴モードで参照できるよう、ここでも会話履歴を保存
+      conversationHistory: agentLogStore.getJobLog(jobId)?.conversationHistory || [],
       result: null,
       executionSummary: {
         totalIterations: 0,
