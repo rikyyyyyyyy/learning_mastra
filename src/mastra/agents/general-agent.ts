@@ -10,16 +10,21 @@ import { jobResultTool } from '../tools/job-result-tool';
 // Task management tools
 import { taskRegistryTool } from '../task-management/tools/task-registry-tool';
 import { directiveManagementTool } from '../task-management/tools/directive-management-tool';
-import { LanguageModel } from 'ai';
+// AI SDKの各プロバイダ関数の戻り値（共通のLanguageModel型）を基準に型を推論
+type AnyModel = ReturnType<typeof openai>;
 import { getAgentPrompt } from '../prompts/agent-prompts';
 
 // モデルを動的に作成する関数
 export function createGeneralAgent(modelType: string = 'claude-sonnet-4'): Agent {
   // モデルに応じて適切なAI SDKを選択
-  let aiModel: LanguageModel;
+  let aiModel: AnyModel;
   let modelInfo: { provider: string; modelId: string; displayName: string };
   
   switch (modelType) {
+    case 'gpt-5':
+      aiModel = openai('gpt-5');
+      modelInfo = { provider: 'OpenAI', modelId: 'gpt-5', displayName: 'GPT-5' };
+      break;
     case 'openai-o3':
       aiModel = openai('o3-2025-04-16');
       modelInfo = { provider: 'OpenAI', modelId: 'o3-2025-04-16', displayName: 'OpenAI o3' };

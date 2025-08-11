@@ -45,6 +45,8 @@ export async function POST(req: NextRequest) {
     const runtimeContext = new RuntimeContext();
     runtimeContext.set('resourceId', user.id);
     runtimeContext.set('threadId', threadId || `thread-${Date.now()}`);
+    // 選択モデルをネットワーク側に伝播
+    if (model) runtimeContext.set('selectedModel', model);
     
     console.log("Chat API: RuntimeContext created with resourceId:", user.id, "threadId:", threadId || `thread-${Date.now()}`);
 

@@ -3,7 +3,19 @@ import { z } from 'zod';
 import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
 import { NewAgentNetwork } from '@mastra/core/network/vNext';
 import { anthropic } from '@ai-sdk/anthropic';
+import { openai } from '@ai-sdk/openai';
+import { google } from '@ai-sdk/google';
 import { Agent } from '@mastra/core/agent';
+type AnyModel = ReturnType<typeof openai>;
+import { sharedMemory } from '../shared-memory';
+import { getAgentPrompt } from '../prompts/agent-prompts';
+import { taskViewerTool } from '../task-management/tools/task-viewer-tool';
+import { finalResultTool } from '../task-management/tools/final-result-tool';
+import { policyManagementTool, policyCheckTool } from '../task-management/tools/policy-management-tool';
+import { taskManagementTool } from '../task-management/tools/task-management-tool';
+import { batchTaskCreationTool } from '../task-management/tools/batch-task-creation-tool';
+import { directiveManagementTool } from '../task-management/tools/directive-management-tool';
+import { exaMCPSearchTool } from '../tools/exa-search-wrapper';
 import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
 
 // バックグラウンドでエージェントネットワークを実行
@@ -88,14 +100,50 @@ const executeAgentNetwork = async (
       console.warn('⚠️ タスクステータスの更新に失敗:', dbError);
     }
 
-    // エージェントを取得
-    const ceoAgent = mastraTyped.getAgent('ceo-agent');
-    const managerAgent = mastraTyped.getAgent('manager-agent');
-    const workerAgent = mastraTyped.getAgent('worker-agent');
+    // 選択されたモデルをruntimeContextから取得し、対応するLanguageModelを解決
+    const selectedModelType = (runtimeContext as { get: (key: string) => unknown })?.get?.('selectedModel') as string | undefined;
 
-    if (!ceoAgent || !managerAgent || !workerAgent) {
-      throw new Error('必要なエージェントが見つかりません');
-    }
+    const resolveModel = (modelType?: string): { aiModel: AnyModel; info: { provider: string; modelId: string; displayName: string } } => {
+      switch (modelType) {
+        case 'gpt-5':
+          return { aiModel: openai('gpt-5'), info: { provider: 'OpenAI', modelId: 'gpt-5', displayName: 'GPT-5' } };
+        case 'openai-o3':
+          return { aiModel: openai('o3-2025-04-16'), info: { provider: 'OpenAI', modelId: 'o3-2025-04-16', displayName: 'OpenAI o3' } };
+        case 'gemini-2.5-flash':
+          return { aiModel: google('gemini-2.5-flash'), info: { provider: 'Google', modelId: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' } };
+        case 'claude-sonnet-4':
+        default:
+          return { aiModel: anthropic('claude-sonnet-4-20250514'), info: { provider: 'Anthropic', modelId: 'claude-sonnet-4-20250514', displayName: 'Claude Sonnet 4' } };
+      }
+    };
+
+    const { aiModel: networkModel, info: networkModelInfo } = resolveModel(selectedModelType);
+    console.log(`🤝 エージェントネットワーク用モデル: ${networkModelInfo.displayName} (${networkModelInfo.provider})`);
+
+    // 選択モデルで各ロールのエージェントを動的生成
+    const ceoAgent = new Agent({
+      name: 'CEO Agent - Strategic Task Director',
+      instructions: getAgentPrompt('CEO'),
+      model: networkModel,
+      tools: { taskViewerTool, finalResultTool, policyManagementTool },
+      memory: sharedMemory,
+    });
+
+    const managerAgent = new Agent({
+      name: 'Manager Agent - Task Planner & Coordinator',
+      instructions: getAgentPrompt('MANAGER'),
+      model: networkModel,
+      tools: { taskManagementTool, batchTaskCreationTool, directiveManagementTool, policyCheckTool },
+      memory: sharedMemory,
+    });
+
+    const workerAgent = new Agent({
+      name: 'Worker Agent - Task Executor',
+      instructions: getAgentPrompt('WORKER'),
+      model: networkModel,
+      tools: { exaMCPSearchTool },
+      memory: sharedMemory,
+    });
 
     // メモリ設定を準備
     const resourceId = (runtimeContext as { get: (key: string) => unknown })?.get?.('resourceId') as string | undefined;
@@ -163,7 +211,7 @@ const executeAgentNetwork = async (
 - Managerは頻繁に追加指令を確認
 - 追加指令があればCEOが方針を修正
 `,
-      model: anthropic('claude-sonnet-4-20250514'),
+      model: networkModel,
       agents: {
         'ceo': ceoAgent as Agent,
         'manager': managerAgent as Agent,

@@ -2,6 +2,19 @@ import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { NewAgentNetwork } from '@mastra/core/network/vNext';
 import { anthropic } from '@ai-sdk/anthropic';
+import { openai } from '@ai-sdk/openai';
+import { google } from '@ai-sdk/google';
+type AnyModel = ReturnType<typeof openai>;
+import { Agent } from '@mastra/core/agent';
+import { sharedMemory } from '../shared-memory';
+import { getAgentPrompt } from '../prompts/agent-prompts';
+import { taskViewerTool } from '../task-management/tools/task-viewer-tool';
+import { finalResultTool } from '../task-management/tools/final-result-tool';
+import { policyManagementTool, policyCheckTool } from '../task-management/tools/policy-management-tool';
+import { taskManagementTool } from '../task-management/tools/task-management-tool';
+import { batchTaskCreationTool } from '../task-management/tools/batch-task-creation-tool';
+import { directiveManagementTool } from '../task-management/tools/directive-management-tool';
+import { exaMCPSearchTool } from '../tools/exa-search-wrapper';
 
 // 入力スキーマ
 const inputSchema = z.object({
@@ -81,10 +94,47 @@ const agentNetworkStep = createStep({
         throw new Error('必要なエージェントが見つかりません');
       }
       
-      // エージェントをそのまま使用（watch-v2イベントでログを取得）
-      const ceoAgent = ceoAgentOriginal;
-      const managerAgent = managerAgentOriginal;
-      const workerAgent = workerAgentOriginal;
+      // runtimeContextの選択モデルに合わせて各ロールを動的再構成
+      const selectedModelType = runtimeContext?.get('selectedModel') as string | undefined;
+      const resolveModel = (modelType?: string): AnyModel => {
+        switch (modelType) {
+          case 'gpt-5':
+            return openai('gpt-5');
+          case 'openai-o3':
+            return openai('o3-2025-04-16');
+          case 'gemini-2.5-flash':
+            return google('gemini-2.5-flash');
+          case 'claude-sonnet-4':
+          default:
+            return anthropic('claude-sonnet-4-20250514');
+        }
+      };
+
+      const networkModel = resolveModel(selectedModelType);
+
+      const ceoAgent = new Agent({
+        name: 'CEO Agent - Strategic Task Director',
+        instructions: getAgentPrompt('CEO'),
+        model: networkModel,
+        tools: { taskViewerTool, finalResultTool, policyManagementTool },
+        memory: sharedMemory,
+      });
+
+      const managerAgent = new Agent({
+        name: 'Manager Agent - Task Planner & Coordinator',
+        instructions: getAgentPrompt('MANAGER'),
+        model: networkModel,
+        tools: { taskManagementTool, batchTaskCreationTool, directiveManagementTool, policyCheckTool },
+        memory: sharedMemory,
+      });
+
+      const workerAgent = new Agent({
+        name: 'Worker Agent - Task Executor',
+        instructions: getAgentPrompt('WORKER'),
+        model: networkModel,
+        tools: { exaMCPSearchTool },
+        memory: sharedMemory,
+      });
 
       // メモリ設定を準備
       const resourceId = runtimeContext?.get('resourceId') as string | undefined;
@@ -102,7 +152,7 @@ const agentNetworkStep = createStep({
         id: 'task-execution-network',
         name: 'Task Execution Network',
         instructions: `Coordinate task execution through CEO-Manager-Worker hierarchy. The network automatically routes between agents based on the conversation flow.`,
-        model: anthropic('claude-sonnet-4-20250514'),
+        model: networkModel,
         agents: {
           'ceo': ceoAgent,
           'manager': managerAgent,

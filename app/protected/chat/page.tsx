@@ -58,7 +58,7 @@ interface JobData {
   connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
 }
 
-type AIModel = "claude-sonnet-4" | "openai-o3" | "gemini-2.5-flash";
+type AIModel = "claude-sonnet-4" | "openai-o3" | "gemini-2.5-flash" | "gpt-5";
 
 interface ModelInfo {
   id: AIModel;
@@ -73,6 +73,12 @@ const AI_MODELS: ModelInfo[] = [
     name: "Claude Sonnet 4",
     provider: "Anthropic",
     description: "高度な推論と創造的なタスクに最適"
+  },
+  {
+    id: "gpt-5",
+    name: "GPT-5",
+    provider: "OpenAI",
+    description: "最新世代の汎用モデル。高度な推論・生成能力"
   },
   {
     id: "openai-o3",
