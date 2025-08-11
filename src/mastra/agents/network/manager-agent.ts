@@ -5,6 +5,7 @@ import { sharedMemory } from '../../shared-memory';
 import { taskManagementTool } from '../../task-management/tools/task-management-tool';
 import { batchTaskCreationTool } from '../../task-management/tools/batch-task-creation-tool';
 import { directiveManagementTool } from '../../task-management/tools/directive-management-tool';
+import { policyCheckTool } from '../../task-management/tools/policy-management-tool';
 import { getAgentPrompt } from '../../prompts/agent-prompts';
 
 export const managerAgent = new Agent({
@@ -15,6 +16,7 @@ export const managerAgent = new Agent({
     taskManagementTool,
     batchTaskCreationTool,
     directiveManagementTool,
+    policyCheckTool,
   },
   memory: sharedMemory,
 });

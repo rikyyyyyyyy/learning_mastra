@@ -122,12 +122,13 @@ const executeAgentNetwork = async (
 
 1. **開始時（Managerがデフォルト）**
    - Managerがタスクを受信
-   - CEOに初回方針決定を要請
+   - 方針が未決定の場合、CEOに方針決定を要請
 
 2. **CEO方針決定**
-   - エージェントネットワーク開始時：全体方針を決定・提示
-   - 追加指令があった時：方針を修正
-   - それ以外の時は応答しない
+   - 方針が未決定の場合：全体方針を決定・提示
+   - 追加指令が報告された場合：方針を修正
+   - 全タスク完了が報告された場合：最終成果物を生成・保存
+   - 上記以外の場合は応答しない
 
 3. **Manager タスク管理**
    - CEO方針に基づきタスクを実行可能な小タスクに分解
@@ -144,14 +145,17 @@ const executeAgentNetwork = async (
 
 5. **結果管理と完了**
    - Managerが各タスクの結果をDBに格納
-   - 全タスク完了後、CEOに最終報告
-   - CEOが最終成果物を承認・納品
+   - 全タスク完了後、Managerが「全タスク完了」をCEOに報告
+   - CEOがtaskViewerToolで小タスクの結果を閲覧
+   - CEOが小タスクの結果を統合して最終成果物を生成
+   - CEOがfinalResultToolで最終成果物を保存（General Agentが取得可能）
 
 ### ルーティングルール：
-- Manager → CEO：初回方針要請、追加指令報告、最終報告時
-- CEO → Manager：方針提示後
-- Manager → Worker：個別タスク指示時
-- Worker → Manager：タスク完了報告時（必須）
+- Manager → CEO：方針が未決定の場合、追加指令がある場合、全タスク完了時
+- CEO → Manager：方針決定後・更新後は必ずManagerに委譲
+- Manager → Worker：個別タスク実行が必要な場合
+- Worker → Manager：タスク完了時は必ずManagerに報告
+- CEO → Network完了：最終成果物保存後（finalResultTool実行後）
 
 ### 重要なポイント：
 - 各エージェントは並列的な役割分担（上下関係なし）
@@ -220,7 +224,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
     
     console.log('🚀 エージェントネットワーク実行オプション:', networkOptions);
     
-    let result;
+    // let result; // CEOエージェントが最終成果物を管理するため不要
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const conversationHistory: any[] = [];
     let iterationCounter = 1;
@@ -460,7 +464,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
           
           // 完了イベント
           if (chunk.type === 'finish') {
-            result = chunk.data || chunk.result;
+            // result = chunk.data || chunk.result; // CEOが最終成果物を管理するため不要
             
             // 未送信の出力を送信
             for (const [agentId, agentOutput] of agentOutputs.entries()) {
@@ -587,14 +591,15 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
         if (streamResult.getWorkflowState) {
           const state = await streamResult.getWorkflowState();
           if (state?.result) {
-            result = state.result;
+            // result = state.result; // CEOが最終成果物を管理するため不要
           }
         }
       }
     } else {
       // 通常のloopメソッドを使用
       console.log('📌 通常のloopメソッドを使用');
-      result = await agentNetwork.loop(networkPrompt, networkOptions);
+      // result = await agentNetwork.loop(networkPrompt, networkOptions); // CEOが最終成果物を管理するため不要
+      await agentNetwork.loop(networkPrompt, networkOptions);
     }
     
     console.log(`🎯 NewAgentNetwork実行完了`);
@@ -612,84 +617,8 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
     // ログストアのジョブを完了としてマーク
     agentLogStore.completeJob(jobId, executionSummary);
     
-    // 結果を整形
-    let finalResult = result?.result?.text || result?.text || result;
-    
-    // スライド生成タスクの特別処理
-    if (inputData.taskType === 'slide-generation') {
-      const workerResponse = conversationHistory.find(entry => 
-        entry.agentId === 'worker' && 
-        entry.message.includes('<!DOCTYPE html>')
-      );
-      
-      if (workerResponse) {
-        let htmlCode = workerResponse.message;
-        
-        // HTMLコードが途中で切れている場合の対処
-        if (!htmlCode.includes('</html>')) {
-          console.warn('⚠️ HTMLコードが途中で切れています。補完を試みます。');
-          
-          if (!htmlCode.includes('class="navigation"')) {
-            const navigationHtml = `
-        <div class="navigation">
-            <button class="nav-btn" onclick="previousSlide()">← 前へ</button>
-            <button class="nav-btn" onclick="nextSlide()">次へ →</button>
-        </div>
-    </div>
-
-    <script>
-        let currentSlide = 0;
-        const slides = document.querySelectorAll('.slide');
-        const totalSlides = slides.length;
-        
-        document.getElementById('total-slides').textContent = totalSlides;
-        
-        function showSlide(n) {
-            slides[currentSlide].classList.remove('active');
-            currentSlide = (n + totalSlides) % totalSlides;
-            slides[currentSlide].classList.add('active');
-            document.getElementById('current-slide').textContent = currentSlide + 1;
-        }
-        
-        function nextSlide() {
-            showSlide(currentSlide + 1);
-        }
-        
-        function previousSlide() {
-            showSlide(currentSlide - 1);
-        }
-        
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'ArrowRight') nextSlide();
-            if (e.key === 'ArrowLeft') previousSlide();
-        });
-    </script>
-</body>
-</html>`;
-            htmlCode += navigationHtml;
-          } else {
-            htmlCode += '\n</body>\n</html>';
-          }
-        }
-        
-        finalResult = {
-          htmlCode: htmlCode,
-          topic: (inputData.taskParameters as { topic?: string })?.topic || 'Untitled',
-          slideCount: (inputData.taskParameters as { pages?: number; slideCount?: number })?.pages || 
-                      (inputData.taskParameters as { pages?: number; slideCount?: number })?.slideCount || 10,
-          style: (inputData.taskParameters as { style?: string })?.style || 'modern',
-          generationTime: Date.now() - startTime
-        };
-      }
-    }
-    
-    const outputData = {
-      success: true,
-      taskType: inputData.taskType,
-      result: finalResult,
-      executionSummary,
-      conversationHistory,
-    };
+    // CEOエージェントが小タスクの結果を統合して最終成果物を生成・保存する
+    // agent-network-tool.tsではジョブステータスの更新のみ行う
 
     console.log('✅ エージェントネットワーク実行完了:', {
       jobId,
@@ -698,10 +627,10 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       timestamp: new Date().toISOString()
     });
 
-    // 結果を保存
+    // ジョブステータスのみ更新（結果の保存はCEOエージェントが行う）
     updateJobStatus(jobId, 'completed');
-    storeJobResult(jobId, outputData, 'agent-network');
-    console.log('💾 ジョブ結果を保存しました:', jobId);
+    console.log('📝 ジョブステータスを完了に更新しました:', jobId);
+    console.log('⏳ CEOエージェントが最終成果物を保存します');
     
     // タスク管理DBのステータスも更新
     try {
@@ -731,12 +660,13 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
     // ログストアのジョブを失敗としてマーク
     agentLogStore.failJob(jobId, error instanceof Error ? error.message : 'Unknown error');
     
-    // エラー時もステータスを保存
+    // エラー時のステータス更新とエラー結果の保存
     updateJobStatus(jobId, 'failed', {
       error: error instanceof Error ? error.message : 'Unknown error'
     });
     
-    const outputData = {
+    // エラー時は結果を直接保存（CEOが処理できないため）
+    const errorResult = {
       success: false,
       taskType: inputData.taskType,
       result: null,
@@ -748,7 +678,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       error: error instanceof Error ? error.message : 'Unknown error occurred',
     };
     
-    storeJobResult(jobId, outputData, 'agent-network');
+    storeJobResult(jobId, errorResult, 'agent-network');
     
     // タスク管理DBのステータスも更新
     try {

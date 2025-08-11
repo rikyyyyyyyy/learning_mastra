@@ -12,8 +12,6 @@ import {
   PauseCircle,
   Network,
   AlertCircle,
-  Target,
-  TrendingUp,
   ChevronDown,
   ChevronUp,
   Activity,
@@ -23,7 +21,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface NetworkTask {
@@ -135,8 +133,7 @@ export function NetworkTaskViewer() {
   };
 
   const groupTasksByNetwork = (
-    tasks: NetworkTask[], 
-    networkInfo?: Map<string, { taskType: string, description: string }>
+    tasks: NetworkTask[]
   ): NetworkGroup[] => {
     const groupMap = new Map<string, NetworkTask[]>();
     
@@ -424,6 +421,76 @@ export function NetworkTaskViewer() {
                 <CollapsibleContent>
                   <CardContent>
                     <ScrollArea className="h-[400px] pr-4">
+                      {/* 方針情報の表示 */}
+                      {(() => {
+                        const mainTask = group.tasks.find(t => !t.step_number || t.step_number === undefined);
+                        const policy = mainTask?.metadata?.policy as {
+                          strategy?: string;
+                          priorities?: string[];
+                          successCriteria?: string[];
+                          qualityStandards?: string[];
+                          outputRequirements?: {
+                            format?: string;
+                            structure?: string;
+                            specificRequirements?: string[];
+                          };
+                          resourcesNeeded?: string[];
+                          constraints?: string[];
+                          additionalNotes?: string;
+                          version?: number;
+                          createdAt?: string;
+                          updatedAt?: string;
+                        } | undefined;
+                        
+                        if (policy) {
+                          return (
+                            <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                              <h4 className="font-semibold text-sm mb-2 text-blue-900 dark:text-blue-100">
+                                📋 CEO方針 (Version {policy.version || 1})
+                              </h4>
+                              <div className="space-y-2 text-sm">
+                                {policy.strategy && (
+                                  <div>
+                                    <span className="font-medium">戦略:</span>
+                                    <p className="text-muted-foreground ml-2">{policy.strategy}</p>
+                                  </div>
+                                )}
+                                {policy.priorities && policy.priorities.length > 0 && (
+                                  <div>
+                                    <span className="font-medium">優先事項:</span>
+                                    <ul className="list-disc list-inside text-muted-foreground ml-2">
+                                      {policy.priorities.map((p, i) => <li key={i}>{p}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                                {policy.successCriteria && policy.successCriteria.length > 0 && (
+                                  <div>
+                                    <span className="font-medium">成功基準:</span>
+                                    <ul className="list-disc list-inside text-muted-foreground ml-2">
+                                      {policy.successCriteria.map((c, i) => <li key={i}>{c}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                                {policy.qualityStandards && policy.qualityStandards.length > 0 && (
+                                  <div>
+                                    <span className="font-medium">品質基準:</span>
+                                    <ul className="list-disc list-inside text-muted-foreground ml-2">
+                                      {policy.qualityStandards.map((s, i) => <li key={i}>{s}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                                {policy.updatedAt && (
+                                  <div className="text-xs text-muted-foreground mt-2">
+                                    最終更新: {formatDate(policy.updatedAt)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                      
                       <div className="space-y-2">
                         {group.tasks
                           .filter(task => task.step_number !== undefined && task.step_number > 0 && task.created_by !== 'general-agent')

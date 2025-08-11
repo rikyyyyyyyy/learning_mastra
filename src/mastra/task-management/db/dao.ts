@@ -213,6 +213,17 @@ export class NetworkTaskDAO extends BaseDAO {
     await this.executeRun(query, [workerId, now, taskId]);
   }
 
+  async updateMetadata(taskId: string, metadata: Record<string, unknown>): Promise<void> {
+    const now = new Date().toISOString();
+    const query = `
+      UPDATE network_tasks 
+      SET metadata = ?, updated_at = ?
+      WHERE task_id = ?
+    `;
+    
+    await this.executeRun(query, [JSON.stringify(metadata), now, taskId]);
+  }
+
   async getNetworkSummary(networkId: string): Promise<{
     total: number;
     queued: number;
