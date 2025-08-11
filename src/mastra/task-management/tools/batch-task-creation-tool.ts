@@ -1,7 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { getDAOs } from '../db/dao';
-import { NetworkTask } from '../db/schema';
+// import { NetworkTask } from '../db/schema';
 
 // バッチタスク作成ツール - Manager用の一括タスク作成
 export const batchTaskCreationTool = createTool({
@@ -35,7 +35,7 @@ export const batchTaskCreationTool = createTool({
     error: z.string().optional(),
   }),
   execute: async ({ context }) => {
-    const startTime = Date.now();
+    // const startTime = Date.now();
     
     try {
       const { networkId, parentJobId, tasks, autoAssign } = context;
@@ -43,7 +43,7 @@ export const batchTaskCreationTool = createTool({
       
       // Ensure response time < 100ms by using setTimeout for actual creation
       const createdTaskIds: Array<{ taskId: string; taskType: string; stepNumber?: number }> = [];
-      const taskPromises: Promise<void>[] = [];
+      // const taskPromises: Promise<void>[] = [];
       
       // Prepare task data synchronously
       const taskDataList = tasks.map((task, index) => {
@@ -108,7 +108,7 @@ export const batchTaskCreationTool = createTool({
           };
           
           // Store network summary for UI display
-          await daos.tasks.updateNetworkMetadata?.(networkId, networkSummary).catch(err => {
+          await daos.tasks.updateMetadata?.(networkId, networkSummary as unknown as Record<string, unknown>).catch(err => {
             console.error('Failed to update network metadata:', err);
           });
           

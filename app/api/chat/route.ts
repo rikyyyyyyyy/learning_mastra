@@ -80,13 +80,13 @@ export async function POST(req: NextRequest) {
           
           // ストリーム全体を処理
           for await (const chunk of stream.fullStream) {
-            // テキストチャンクの場合
+            // テキストチャンクの場合（v5: text プロパティ）
             if (chunk.type === 'text-delta') {
-              textBuffer += chunk.textDelta;
-              // テキストの差分をJSONイベントとして送信
+              const delta = (chunk as unknown as { text?: string }).text ?? '';
+              textBuffer += delta;
               const event = JSON.stringify({
                 type: 'text',
-                content: chunk.textDelta
+                content: delta
               }) + '\n';
               controller.enqueue(encoder.encode(event));
             }
@@ -103,10 +103,11 @@ export async function POST(req: NextRequest) {
               console.log(`  - 文字コード: ${[...toolName].map(c => c.charCodeAt(0)).join(', ')}`);
               
               // ツール実行イベントを送信
+              const input = (chunk as unknown as { input?: unknown }).input;
               const event = JSON.stringify({
                 type: 'tool-execution',
                 toolName: toolName,
-                args: chunk.args
+                input
               }) + '\n';
               controller.enqueue(encoder.encode(event));
               
@@ -115,7 +116,8 @@ export async function POST(req: NextRequest) {
               console.log(`🔍 ツール名チェック2: "${toolName}" === "agentNetworkTool" ? ${toolName === 'agentNetworkTool'}`);
               
               if (toolName === 'agent-network-executor' || toolName === 'agentNetworkTool') {
-                console.log(`🤖 エージェントネットワークツール呼び出し検出 (${toolName}) - 引数:`, JSON.stringify(chunk.args, null, 2));
+                const input = (chunk as unknown as { input?: unknown }).input;
+                console.log(`🤖 エージェントネットワークツール呼び出し検出 (${toolName}) - 引数:`, JSON.stringify(input, null, 2));
               }
             }
             
@@ -123,17 +125,19 @@ export async function POST(req: NextRequest) {
             if (chunk.type === 'tool-result') {
               console.log(`📊 ツール結果:`, chunk);
               console.log(`📊 ツール名:`, chunk.toolName);
-              console.log(`📊 結果詳細:`, JSON.stringify(chunk.result, null, 2));
+              const output = (chunk as unknown as { output?: unknown }).output;
+              console.log(`📊 結果詳細:`, JSON.stringify(output, null, 2));
               
               // すべてのツール結果をデバッグ用にログ出力
               console.log(`🔍 ツール結果のデバッグ情報:`);
               console.log(`  - chunk.type: ${chunk.type}`);
               console.log(`  - chunk.toolName: ${chunk.toolName}`);
-              console.log(`  - chunk.result: ${JSON.stringify(chunk.result)}`);
-              console.log(`  - typeof chunk.result: ${typeof chunk.result}`);
-              if (chunk.result) {
-                console.log(`  - chunk.result keys: ${Object.keys(chunk.result)}`);
-                console.log(`  - chunk.result.jobId: ${chunk.result.jobId}`);
+              console.log(`  - chunk.output: ${JSON.stringify(output)}`);
+              console.log(`  - typeof chunk.output: ${typeof output}`);
+              if (output && typeof output === 'object') {
+                const outputObj = output as Record<string, unknown>;
+                console.log(`  - chunk.output keys: ${Object.keys(outputObj)}`);
+                console.log(`  - chunk.output.jobId: ${String(outputObj['jobId'] ?? '')}`);
               }
               
               // すべてのツール結果で特別な処理が必要か確認
@@ -143,22 +147,24 @@ export async function POST(req: NextRequest) {
               // agent-network-executorの結果を処理
               if (chunk.toolName === 'agent-network-executor' || chunk.toolName === 'agentNetworkTool') {
                 console.log(`🤖 エージェントネットワークツール検出 (名前: ${chunk.toolName})`);
-                console.log(`🤖 結果の型:`, typeof chunk.result);
-                console.log(`🤖 結果のキー:`, chunk.result ? Object.keys(chunk.result) : 'null');
-                console.log(`🤖 結果の内容:`, JSON.stringify(chunk.result, null, 2));
+                console.log(`🤖 結果の型:`, typeof output);
+                console.log(`🤖 結果のキー:`, output && typeof output === 'object' ? Object.keys(output as Record<string, unknown>) : 'null');
+                console.log(`🤖 結果の内容:`, JSON.stringify(output, null, 2));
                 
                 // jobIdは結果オブジェクトの直接のプロパティ
-                if (chunk.result && chunk.result.jobId) {
-                  console.log(`🤖 エージェントネットワークジョブ開始: ${chunk.result.jobId}`);
+                if (output && typeof output === 'object' && 'jobId' in output && output.jobId) {
+                  const jobId = String((output as Record<string, unknown>)['jobId']);
+                  const taskType = String((output as Record<string, unknown>)['taskType'] ?? 'unknown');
+                  console.log(`🤖 エージェントネットワークジョブ開始: ${jobId}`);
                   const event = JSON.stringify({
                     type: 'agent-network-job',
-                    jobId: chunk.result.jobId,
-                    taskType: chunk.result.taskType || 'unknown'
+                    jobId,
+                    taskType
                   }) + '\n';
                   controller.enqueue(encoder.encode(event));
-                  console.log(`📡 agent-network-jobイベントを送信しました: ${chunk.result.jobId}`);
+                  console.log(`📡 agent-network-jobイベントを送信しました: ${jobId}`);
                 } else {
-                  console.error(`❌ jobIdが見つかりません。結果:`, chunk.result);
+                  console.error(`❌ jobIdが見つかりません。結果:`, output);
                   console.error(`❌ chunk全体:`, JSON.stringify(chunk, null, 2));
                 }
               }
@@ -170,11 +176,12 @@ export async function POST(req: NextRequest) {
                 chunk.toolName === 'slidePreviewTool' ||
                 chunk.toolName === 'slide-preview-tool';
                 
-              if (isSlidePreviewTool && chunk.result?.previewReady) {
-                console.log(`🎨 スライドプレビューイベントを送信: ${chunk.result.jobId}`);
+              const slideOutput = (chunk as unknown as { output?: { previewReady?: boolean; jobId?: string } }).output;
+              if (isSlidePreviewTool && slideOutput?.previewReady) {
+                console.log(`🎨 スライドプレビューイベントを送信: ${slideOutput.jobId}`);
                 const event = JSON.stringify({
                   type: 'slide-preview-ready',
-                  jobId: chunk.result.jobId
+                  jobId: slideOutput.jobId
                 }) + '\n';
                 controller.enqueue(encoder.encode(event));
               }

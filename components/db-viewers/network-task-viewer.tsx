@@ -120,7 +120,7 @@ export function NetworkTaskViewer() {
         });
         
         // Group tasks by network ID
-        const groups = groupTasksByNetwork(data.tasks, networkInfo);
+        const groups = groupTasksByNetwork(data.tasks);
         setNetworkGroups(groups);
       } else {
         throw new Error(data.error || 'Failed to fetch tasks');

@@ -315,7 +315,7 @@ export function TaskViewer({ networkId }: { networkId?: string }) {
                       </div>
                     )}
                     
-                    {task.task_parameters && (
+                    {typeof task.task_parameters !== 'undefined' && (
                       <div>
                         <span className="font-medium text-sm">パラメータ:</span>
                         <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto">
@@ -324,7 +324,7 @@ export function TaskViewer({ networkId }: { networkId?: string }) {
                       </div>
                     )}
                     
-                    {task.task_result && (
+                    {typeof task.task_result !== 'undefined' && (
                       <div>
                         <span className="font-medium text-sm">結果:</span>
                         <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto max-h-48 overflow-y-auto">
