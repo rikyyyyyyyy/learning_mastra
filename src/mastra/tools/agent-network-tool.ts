@@ -17,6 +17,134 @@ import { batchTaskCreationTool } from '../task-management/tools/batch-task-creat
 import { directiveManagementTool } from '../task-management/tools/directive-management-tool';
 import { exaMCPSearchTool } from '../tools/exa-search-wrapper';
 import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
+import { createAgentLogger } from '../utils/agent-logger';
+
+// ===== Typed stream event definitions and helpers =====
+type AgentRoutingChunk = {
+  type: 'agent-routing';
+  data?: { fromAgent?: string; toAgent?: string; reason?: string };
+};
+
+type ToolCallStartChunk = {
+  type: 'tool-call-streaming-start';
+  name?: string;
+  toolName?: string;
+  args?: { resourceId?: string };
+};
+
+type ToolCallDeltaChunk = {
+  type: 'tool-call-delta';
+  argsTextDelta?: string;
+  args?: { resourceId?: string };
+};
+
+type ToolCallFinishChunk = {
+  type: 'tool-call-streaming-finish';
+  toolName?: string;
+};
+
+type ToolResultChunk = {
+  type: 'tool-result';
+  name?: string;
+  toolName?: string;
+  result?: unknown;
+};
+
+type TextDeltaChunk = {
+  type: 'text-delta';
+  text?: string;
+  textDelta?: string;
+};
+
+type ToolCallChunk = {
+  type: 'tool-call';
+  name?: string;
+  toolName?: string;
+};
+
+type AgentMessageChunk = {
+  type: 'agent-message' | 'message';
+  data?: { agentId?: string; name?: string; content?: string; text?: string };
+  content?: string; // some variants may put content at root
+  name?: string;
+};
+
+type StepResultChunk = {
+  type: 'step-result';
+  stepId?: string;
+  payload?: { output?: { resourceId?: string } };
+};
+
+type StepFinishChunk = {
+  type: 'step-finish';
+  stepId?: string;
+  payload?: unknown;
+};
+
+type FinishChunk = {
+  type: 'finish';
+  data?: unknown;
+  result?: unknown;
+};
+
+type WorkflowStreamChunk =
+  | AgentRoutingChunk
+  | ToolCallStartChunk
+  | ToolCallDeltaChunk
+  | ToolCallFinishChunk
+  | ToolResultChunk
+  | TextDeltaChunk
+  | ToolCallChunk
+  | AgentMessageChunk
+  | StepResultChunk
+  | StepFinishChunk
+  | FinishChunk
+  | { type: string; [key: string]: unknown };
+
+// Reserved for future use when tool name extraction needs unification
+// function getToolNameFromChunk(chunk: Partial<ToolCallStartChunk | ToolCallFinishChunk | ToolResultChunk | ToolCallChunk>): string | undefined {
+//   return (chunk as Partial<ToolResultChunk>).toolName ?? (chunk as Partial<ToolCallStartChunk | ToolCallChunk>).name;
+// }
+
+function inferAgentFromString(raw?: string): { id: 'ceo' | 'manager' | 'worker'; name: 'CEO Agent' | 'Manager Agent' | 'Worker Agent' } | null {
+  const s = (raw || '').toLowerCase();
+  if (s.includes('ceo')) return { id: 'ceo', name: 'CEO Agent' };
+  if (s.includes('manager')) return { id: 'manager', name: 'Manager Agent' };
+  if (s.includes('worker')) return { id: 'worker', name: 'Worker Agent' };
+  return null;
+}
+
+function inferAgentFromChunk(chunk: WorkflowStreamChunk): { id: string; name: string } | null {
+  // name/toolName
+  if ('name' in chunk && (chunk as Partial<ToolCallStartChunk | ToolCallChunk>).name) {
+    const g = inferAgentFromString((chunk as Partial<ToolCallStartChunk | ToolCallChunk>).name);
+    if (g) return g;
+  }
+  if ('toolName' in chunk && (chunk as Partial<ToolResultChunk | ToolCallFinishChunk>).toolName) {
+    const g = inferAgentFromString((chunk as Partial<ToolResultChunk | ToolCallFinishChunk>).toolName);
+    if (g) return g;
+  }
+  // args.resourceId
+  if ('args' in chunk && (chunk as Partial<ToolCallStartChunk | ToolCallDeltaChunk>).args?.resourceId) {
+    const g = inferAgentFromString((chunk as Partial<ToolCallStartChunk | ToolCallDeltaChunk>).args?.resourceId);
+    if (g) return g;
+  }
+  // result.resourceId (if result is an object)
+  if ('result' in chunk) {
+    const r = (chunk as Partial<ToolResultChunk>).result as { resourceId?: string } | undefined;
+    if (r?.resourceId) {
+      const g = inferAgentFromString(r.resourceId);
+      if (g) return g;
+    }
+  }
+  // data.agentId/name
+  if ('data' in chunk && (chunk as Partial<AgentMessageChunk>).data) {
+    const d = (chunk as Partial<AgentMessageChunk>).data;
+    const g = inferAgentFromString(d?.agentId || d?.name);
+    if (g) return g;
+  }
+  return null;
+}
 
 // バックグラウンドでエージェントネットワークを実行
 const executeAgentNetwork = async (
@@ -39,11 +167,8 @@ const executeAgentNetwork = async (
   const startTime = Date.now();
   
   try {
-    console.log('🚀 エージェントネットワーク実行開始:', {
-      jobId,
-      taskType: inputData.taskType,
-      timestamp: new Date().toISOString()
-    });
+    const logger = createAgentLogger('AgentNetwork');
+    logger.info(`エージェントネットワーク実行開始 jobId=${jobId} taskType=${inputData.taskType} ts=${new Date().toISOString()}`);
 
     // タスク管理システムにタスクを登録
     try {
@@ -74,7 +199,7 @@ const executeAgentNetwork = async (
         },
       });
       
-      console.log('✅ タスクをタスク管理DBに登録:', jobId);
+      logger.debug(`タスクをタスク管理DBに登録 jobId=${jobId}`);
     } catch (dbError) {
       console.warn('⚠️ タスク管理DBへの登録に失敗（処理は継続）:', dbError);
     }
@@ -118,7 +243,7 @@ const executeAgentNetwork = async (
     };
 
     const { aiModel: networkModel, info: networkModelInfo } = resolveModel(selectedModelType);
-    console.log(`🤝 エージェントネットワーク用モデル: ${networkModelInfo.displayName} (${networkModelInfo.provider})`);
+    logger.info(`エージェントネットワーク用モデル model=${networkModelInfo.displayName} provider=${networkModelInfo.provider}`);
 
     // 選択モデルで各ロールのエージェントを動的生成
     const ceoAgent = new Agent({
@@ -219,7 +344,10 @@ const executeAgentNetwork = async (
       },
       defaultAgent: managerAgent as Agent,
       // memoryはDynamicArgument型（関数）を要求される環境があるため、関数ラッパで適合させる
-      memory: (memory ? (() => memory) : undefined) as undefined,
+      // NewAgentNetwork の DynamicArgument 署名に合わせる（未使用引数は破棄）。
+      memory: memory
+        ? ((() => memory) as unknown as never)
+        : undefined,
     });
 
     // タスクコンテキストを準備
@@ -249,7 +377,7 @@ IMPORTANT: When creating tasks in the database, use the Network ID "${jobId}" fo
 As the CEO agent, analyze this task and provide strategic direction. The agent network will automatically route your guidance to the appropriate agents for planning and execution.
 `;
 
-    console.log('🎯 ネットワークプロンプト:', networkPrompt);
+    logger.debug(`ネットワークプロンプト preview=${networkPrompt.substring(0, 400)}`);
 
     // ログストアのジョブを作成
     const jobLog = agentLogStore.getJobLog(jobId);
@@ -270,15 +398,14 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       stream: true,
     };
     
-    console.log('🚀 エージェントネットワーク実行オプション:', networkOptions);
+    logger.debug(`エージェントネットワーク実行オプション maxIterations=${networkOptions.maxIterations} debug=${networkOptions.debug} stream=${networkOptions.stream}`);
     
-    // let result; // CEOエージェントが最終成果物を管理するため不要
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const conversationHistory: any[] = [];
+    // CEOが最終成果物を管理するため result は不要
+    const conversationHistory: import('../utils/agent-log-store').AgentConversationEntry[] = [];
     let iterationCounter = 1;
     
     // エージェントネットワークを実行
-    console.log(`🎯 NewAgentNetwork実行開始 - jobId: ${jobId}`);
+    logger.info(`NewAgentNetwork実行開始 jobId=${jobId}`);
     
     // loopStreamメソッドが存在する場合はそれを使用
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -298,7 +425,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       
       // ストリームの処理
       if (streamResult && streamResult.stream) {
-        console.log('🌊 ストリームオブジェクトを取得');
+        logger.debug('ストリームオブジェクトを取得');
         
         const agentOutputs = new Map<string, { 
           id: string, 
@@ -309,22 +436,25 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
           isSent: boolean,
           iteration: number
         }>();
+        // ジョブスコープでツール名を保持（グローバル状態は使用しない）
+        const toolNameByAgent = new Map<string, string>();
         let currentStreamingAgent: { id: string, name: string } | null = null;
         let lastActiveAgent: string | null = null;
         const processedMessageIds = new Set<string>();
         
         // ストリームからイベントを処理
-        for await (const chunk of streamResult.stream) {
+        for await (const rawChunk of streamResult.stream) {
+          const chunk = rawChunk as WorkflowStreamChunk;
           
           // エージェントルーティングイベント
           if (chunk.type === 'agent-routing') {
-            const routingInfo = chunk.data;
-            console.log(`🔀 エージェントルーティング: ${routingInfo.fromAgent} → ${routingInfo.toAgent}`);
+            const routingInfo = (chunk as AgentRoutingChunk).data ?? {};
+            logger.debug(`エージェントルーティング from=${String(routingInfo.fromAgent || '')} to=${String(routingInfo.toAgent || '')} reason=${routingInfo.reason || 'N/A'}`);
             
             const routingEntry = formatAgentMessage(
               'system',
               'Network Router',
-              `ルーティング: ${routingInfo.fromAgent} → ${routingInfo.toAgent}\n理由: ${routingInfo.reason || 'N/A'}`,
+              `ルーティング: ${String(routingInfo.fromAgent || '')} → ${String(routingInfo.toAgent || '')}\n理由: ${routingInfo.reason || 'N/A'}`,
               iterationCounter,
               'internal'
             );
@@ -381,16 +511,9 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
             let agentName = 'Unknown Agent';
             let agentId = 'unknown';
             
-            const guessFrom = (v?: string) => {
-              const s = (v || '').toLowerCase();
-              if (s.includes('ceo')) return { id: 'ceo', name: 'CEO Agent' } as const;
-              if (s.includes('manager')) return { id: 'manager', name: 'Manager Agent' } as const;
-              if (s.includes('worker')) return { id: 'worker', name: 'Worker Agent' } as const;
-              return null;
-            };
-            const g = guessFrom(chunk.name) || guessFrom(chunk.toolName);
+            const g = inferAgentFromChunk(chunk) as { id: 'ceo' | 'manager' | 'worker'; name: 'CEO Agent' | 'Manager Agent' | 'Worker Agent' } | null;
             if (g) { agentId = g.id; agentName = g.name; }
-            else if (chunk.name) { agentName = chunk.name; agentId = chunk.name.toLowerCase().replace(/\s+/g, '-'); }
+            else if ((chunk as ToolCallChunk).name) { agentName = (chunk as ToolCallChunk).name!; agentId = (chunk as ToolCallChunk).name!.toLowerCase().replace(/\s+/g, '-'); }
             
             if (lastActiveAgent && lastActiveAgent !== agentId) {
               iterationCounter++;
@@ -427,21 +550,9 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
             let agentName = 'Unknown Agent';
             let agentId = 'unknown';
             
-            if (chunk.name) {
-              if (chunk.name.toLowerCase().includes('ceo')) {
-                agentId = 'ceo';
-                agentName = 'CEO Agent';
-              } else if (chunk.name.toLowerCase().includes('manager')) {
-                agentId = 'manager';
-                agentName = 'Manager Agent';
-              } else if (chunk.name.toLowerCase().includes('worker')) {
-                agentId = 'worker';
-                agentName = 'Worker Agent';
-              } else {
-                agentName = chunk.name;
-                agentId = chunk.name.toLowerCase().replace(/\s+/g, '-');
-              }
-            }
+            const inferred = inferAgentFromChunk(chunk);
+            if (inferred) { agentId = inferred.id; agentName = inferred.name; }
+            else if ((chunk as ToolCallStartChunk).name) { agentName = (chunk as ToolCallStartChunk).name!; agentId = (chunk as ToolCallStartChunk).name!.toLowerCase().replace(/\s+/g, '-'); }
             
             if (lastActiveAgent && lastActiveAgent !== agentId) {
               iterationCounter++;
@@ -449,6 +560,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
             lastActiveAgent = agentId;
             
             currentStreamingAgent = { id: agentId, name: agentName };
+            const startedToolName = (chunk as ToolCallStartChunk).toolName || (chunk as ToolCallStartChunk).name;
             agentOutputs.set(agentId, { 
               id: agentId, 
               name: agentName, 
@@ -458,6 +570,8 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
               isSent: false,
               iteration: iterationCounter
             });
+            // ツール名はジョブスコープのマップで保持
+            if (startedToolName) toolNameByAgent.set(agentId, startedToolName);
             
             const startMessageKey = `start-${agentId}-${iterationCounter}`;
             if (!processedMessageIds.has(startMessageKey)) {
@@ -474,27 +588,27 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
           }
           
           // テキストデルタ（蓄積のみ。部分送信は行わない）
-          if (chunk.type === 'tool-call-delta' && currentStreamingAgent && (chunk as unknown as { argsTextDelta?: string }).argsTextDelta) {
+          if (chunk.type === 'tool-call-delta' && currentStreamingAgent && (chunk as ToolCallDeltaChunk).argsTextDelta) {
             const agentOutput = agentOutputs.get(currentStreamingAgent.id);
             if (agentOutput) {
-              const argsDelta = (chunk as unknown as { argsTextDelta?: string }).argsTextDelta || '';
+              const argsDelta = (chunk as ToolCallDeltaChunk).argsTextDelta || '';
               agentOutput.content += argsDelta;
             }
           }
           // 追加: agentからの直接text-delta（蓄積のみ。部分送信は行わない）
-          if (chunk.type === 'text-delta' && currentStreamingAgent && ((chunk as unknown as { text?: string, textDelta?: string }).text || (chunk as unknown as { textDelta?: string }).textDelta)) {
+          if (chunk.type === 'text-delta' && currentStreamingAgent && ((chunk as TextDeltaChunk).text || (chunk as TextDeltaChunk).textDelta)) {
             const agentOutput = agentOutputs.get(currentStreamingAgent.id);
             if (agentOutput) {
-              const delta = (chunk as unknown as { text?: string, textDelta?: string }).text || (chunk as unknown as { textDelta?: string }).textDelta || '';
+              const delta = (chunk as TextDeltaChunk).text || (chunk as TextDeltaChunk).textDelta || '';
               agentOutput.content += delta;
             }
           }
           
-          // ツール呼び出し完了
+              // ツール呼び出し完了
           if (chunk.type === 'tool-call-streaming-finish' && currentStreamingAgent) {
             const agentOutput = agentOutputs.get(currentStreamingAgent.id);
             if (agentOutput && agentOutput.content && !agentOutput.isSent) {
-              console.log(`✅ ${currentStreamingAgent.name}の応答完了 - ${agentOutput.content.length}文字`);
+              logger.debug(`エージェント応答完了 agent=${currentStreamingAgent.name} length=${agentOutput.content.length}`);
               
               const finalEntry = formatAgentMessage(
                 currentStreamingAgent.id,
@@ -503,6 +617,14 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                 agentOutput.iteration,
                 'response'
               );
+              // ツール名をバッジ表示用メタデータに付与（あれば）
+              const toolName = (chunk as unknown as { toolName?: string }).toolName || toolNameByAgent.get(currentStreamingAgent.id);
+              if (toolName) {
+                finalEntry.metadata = {
+                  ...(finalEntry.metadata || {}),
+                  tools: [toolName],
+                };
+              }
               
               agentLogStore.addLogEntry(jobId, finalEntry);
               agentOutput.isSent = true;
@@ -535,13 +657,11 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
           // ステップ結果（agent-step）でのフォールバック送信
           if (chunk.type === 'step-result') {
             try {
-              const output = (chunk as { payload?: { output?: unknown } }).payload?.output as Record<string, unknown> | undefined;
+              const output = (chunk as StepResultChunk).payload?.output as Record<string, unknown> | undefined;
               let agentId = 'unknown';
               let agentName = 'Unknown Agent';
-              const rid = String(output?.resourceId || '').toLowerCase();
-              if (rid.includes('ceo')) { agentId = 'ceo'; agentName = 'CEO Agent'; }
-              else if (rid.includes('manager')) { agentId = 'manager'; agentName = 'Manager Agent'; }
-              else if (rid.includes('worker')) { agentId = 'worker'; agentName = 'Worker Agent'; }
+              const inferred = inferAgentFromString(output?.resourceId as string | undefined);
+              if (inferred) { agentId = inferred.id; agentName = inferred.name; }
 
               if (agentId !== 'unknown') {
                 const agentOutput = agentOutputs.get(agentId);
@@ -569,15 +689,13 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
           // 汎用エージェントメッセージのフォールバック
           if (chunk.type === 'agent-message' || chunk.type === 'message') {
             try {
-              const data = (chunk as { data?: unknown }).data || chunk;
-              const content = (data as Record<string, unknown>)?.content as string || (data as Record<string, unknown>)?.text as string;
+              const data = (chunk as AgentMessageChunk).data || chunk;
+              const content = (data as { content?: string; text?: string })?.content || (data as { text?: string })?.text;
               if (content) {
                 let agentId = 'system';
                 let agentName = 'System';
-                const raw = String((data as Record<string, unknown>)?.agentId || (data as Record<string, unknown>)?.name || '').toLowerCase();
-                if (raw.includes('ceo')) { agentId = 'ceo'; agentName = 'CEO Agent'; }
-                else if (raw.includes('manager')) { agentId = 'manager'; agentName = 'Manager Agent'; }
-                else if (raw.includes('worker')) { agentId = 'worker'; agentName = 'Worker Agent'; }
+                const inferred = inferAgentFromString((data as { agentId?: string; name?: string })?.agentId || (data as { name?: string })?.name);
+                if (inferred) { agentId = inferred.id; agentName = inferred.name; }
 
                 const entry = formatAgentMessage(
                   agentId,
@@ -595,20 +713,13 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
           }
 
           // フォールバック: ツール結果イベント
-          if (chunk.type === 'tool-result' && chunk.result) {
+          if (chunk.type === 'tool-result' && (chunk as ToolResultChunk).result) {
             let agentId = currentStreamingAgent?.id || 'unknown';
             let agentName = currentStreamingAgent?.name || 'Unknown Agent';
-            const guessFrom = (v?: string) => {
-              const s = (v || '').toLowerCase();
-              if (s.includes('ceo')) return { id: 'ceo', name: 'CEO Agent' } as const;
-              if (s.includes('manager')) return { id: 'manager', name: 'Manager Agent' } as const;
-              if (s.includes('worker')) return { id: 'worker', name: 'Worker Agent' } as const;
-              return null;
-            };
-            const g = guessFrom(chunk.name) || guessFrom(chunk.toolName) || guessFrom((chunk.result as Record<string, unknown>)?.resourceId as string);
+            const g = inferAgentFromChunk(chunk) || inferAgentFromString(((chunk as ToolResultChunk).result as { resourceId?: string })?.resourceId);
             if (g) { agentId = g.id; agentName = g.name; }
             
-            const agentOutput = currentStreamingAgent ? agentOutputs.get(currentStreamingAgent.id) : undefined;
+            const agentOutput = currentStreamingAgent ? agentOutputs.get(currentStreamingAgent.id) : agentOutputs.get(agentId);
             if (agentOutput && agentOutput.content) {
               const finalEntry = formatAgentMessage(
                 agentId,
@@ -617,12 +728,19 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                 agentOutput.iteration,
                 'response'
               );
+              const toolName = (chunk as ToolResultChunk).toolName || toolNameByAgent.get(agentId);
+              if (toolName) {
+                finalEntry.metadata = {
+                  ...(finalEntry.metadata || {}),
+                  tools: [toolName],
+                };
+              }
               agentLogStore.addLogEntry(jobId, finalEntry);
               conversationHistory.push(finalEntry);
               agentOutputs.delete(agentId);
               currentStreamingAgent = null;
             } else {
-              const resultText = typeof chunk.result === 'string' ? chunk.result : JSON.stringify(chunk.result);
+              const resultText = typeof (chunk as ToolResultChunk).result === 'string' ? (chunk as ToolResultChunk).result as string : JSON.stringify((chunk as ToolResultChunk).result);
               const finalEntry = formatAgentMessage(
                 agentId,
                 agentName,
@@ -630,6 +748,13 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
                 iterationCounter,
                 'response'
               );
+              const toolName = (chunk as ToolResultChunk).toolName || toolNameByAgent.get(agentId);
+              if (toolName) {
+                finalEntry.metadata = {
+                  ...(finalEntry.metadata || {}),
+                  tools: [toolName],
+                };
+              }
               agentLogStore.addLogEntry(jobId, finalEntry);
               conversationHistory.push(finalEntry);
               currentStreamingAgent = null;
@@ -647,12 +772,12 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       }
     } else {
       // 通常のloopメソッドを使用
-      console.log('📌 通常のloopメソッドを使用');
+      logger.debug('通常のloopメソッドを使用');
       // result = await agentNetwork.loop(networkPrompt, networkOptions); // CEOが最終成果物を管理するため不要
       await agentNetwork.loop(networkPrompt, networkOptions);
     }
     
-    console.log(`🎯 NewAgentNetwork実行完了`);
+    logger.info('NewAgentNetwork実行完了');
     
     const endTime = Date.now();
     const executionTime = ((endTime - startTime) / 1000).toFixed(2);
@@ -670,17 +795,12 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
     // CEOエージェントが小タスクの結果を統合して最終成果物を生成・保存する
     // agent-network-tool.tsではジョブステータスの更新のみ行う
 
-    console.log('✅ エージェントネットワーク実行完了:', {
-      jobId,
-      taskType: inputData.taskType,
-      executionTime: `${executionTime}s`,
-      timestamp: new Date().toISOString()
-    });
+    logger.info(`エージェントネットワーク実行完了 jobId=${jobId} taskType=${inputData.taskType} time=${executionTime}s ts=${new Date().toISOString()}`);
 
     // ジョブステータスのみ更新（結果の保存はCEOエージェントが行う）
     updateJobStatus(jobId, 'completed');
-    console.log('📝 ジョブステータスを完了に更新しました:', jobId);
-    console.log('⏳ CEOエージェントが最終成果物を保存します');
+    logger.debug(`ジョブステータスを完了に更新 jobId=${jobId}`);
+    logger.debug('CEOエージェントが最終成果物を保存します');
     
     // タスク管理DBのステータスも更新
     try {
@@ -694,7 +814,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       if (inputData.taskType === 'slide-generation' && finalResult && typeof finalResult === 'object' && 'htmlCode' in finalResult) {
         const slideResult = finalResult as { htmlCode: string; topic?: string; slideCount?: number; style?: string };
         // artifact保存処理をここに実装
-        console.log('📦 スライドHTMLの成果物保存はスキップ（将来実装予定）');
+        logger.debug('スライドHTMLの成果物保存はスキップ（将来実装予定）');
       }
       */
     } catch (dbError) {
@@ -702,7 +822,10 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
     }
 
   } catch (error) {
-    console.error('❌ エージェントネットワークエラー:', error);
+    const { classifyError } = await import('../utils/errors');
+    const logger = createAgentLogger('AgentNetwork');
+    const classification = classifyError(error);
+    logger.error(`エージェントネットワークエラー type=${classification} error=${error instanceof Error ? error.message : String(error)}`);
     
     const endTime = Date.now();
     const executionTime = ((endTime - startTime) / 1000).toFixed(2);
@@ -712,7 +835,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
     
     // エラー時のステータス更新とエラー結果の保存
     updateJobStatus(jobId, 'failed', {
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     
     // エラー時は結果を直接保存（CEOが処理できないため）
@@ -728,6 +851,7 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
         executionTime: `${executionTime}s`,
       },
       error: error instanceof Error ? error.message : 'Unknown error occurred',
+      errorType: classification,
     };
     
     storeJobResult(jobId, errorResult, 'agent-network');
@@ -748,15 +872,15 @@ export const agentNetworkTool = createTool({
   id: 'agent-network-executor',
   description: 'Execute any task through the hierarchical agent network (CEO-Manager-Worker pattern)',
   inputSchema: z.object({
-    taskType: z.string().describe('Type of task: web-search, slide-generation, weather, etc.'),
-    taskDescription: z.string().describe('Detailed description of what needs to be done'),
-    taskParameters: z.any().describe('Task-specific parameters (query, location, topic, etc.)'),
+    taskType: z.enum(['web-search', 'slide-generation', 'weather', 'other']).describe('Type of task'),
+    taskDescription: z.string().min(1),
+    taskParameters: z.record(z.unknown()).describe('Task-specific parameters (object expected)'),
     context: z.object({
       priority: z.enum(['low', 'medium', 'high']).optional(),
-      constraints: z.any().optional().describe('Any limitations or requirements'),
-      expectedOutput: z.string().optional().describe('Description of expected output format'),
-      additionalInstructions: z.string().optional().describe('Any additional instructions for the agents'),
-    }).optional().describe('Additional context for task execution'),
+      constraints: z.record(z.unknown()).optional().describe('Any limitations or requirements'),
+      expectedOutput: z.string().optional(),
+      additionalInstructions: z.string().optional(),
+    }).optional(),
   }),
   outputSchema: z.object({
     jobId: z.string(),
@@ -766,17 +890,19 @@ export const agentNetworkTool = createTool({
     estimatedTime: z.string().optional(),
   }),
   execute: async ({ context, runtimeContext }) => {
-    const { taskType, taskDescription, taskParameters, context: taskContext } = context;
+    const { taskType, taskDescription, taskParameters, context: taskContext } = (context as unknown) as
+      | { taskType: 'web-search'; taskDescription: string; taskParameters: { query: string; depth?: 'shallow'|'deep'; language?: string; maxResults?: number }; context?: unknown }
+      | { taskType: 'slide-generation'; taskDescription: string; taskParameters: { topic: string; style?: string; pages?: number; language?: string }; context?: unknown }
+      | { taskType: 'weather'; taskDescription: string; taskParameters: { location: string; unit?: 'metric'|'imperial'; language?: string }; context?: unknown }
+      | { taskType: 'other'; taskDescription: string; taskParameters: Record<string, unknown>; context?: unknown };
+    // taskContext は inputSchema に準拠
+    // const taskContextTyped is available if needed in future validations
     
     // ジョブIDを生成
     const jobId = `agent-network-${taskType}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     
-    console.log('🎯 エージェントネットワークタスクを受信:', {
-      jobId,
-      taskType,
-      taskDescription,
-      hasRuntimeContext: !!runtimeContext
-    });
+    const logger = createAgentLogger('AgentNetwork');
+    logger.info(`エージェントネットワークタスクを受信 jobId=${jobId} taskType=${taskType} hasRuntimeContext=${!!runtimeContext}`);
 
     // ジョブを初期化
     initializeJob(jobId);
@@ -800,17 +926,17 @@ export const agentNetworkTool = createTool({
           taskType,
           taskDescription,
           taskParameters,
-          context: taskContext,
+          context: taskContext as { priority?: 'low'|'medium'|'high'; constraints?: unknown; expectedOutput?: string; additionalInstructions?: string } | undefined,
         }, runtimeContext);
       });
     }, 0);
 
     // 推定時間をタスクタイプに基づいて設定
-    const estimatedTimes: Record<string, string> = {
+    const estimatedTimes: Record<'web-search' | 'slide-generation' | 'weather' | 'other', string> = {
       'web-search': '15-30 seconds',
       'slide-generation': '30-60 seconds',
       'weather': '5-10 seconds',
-      'default': '20-40 seconds'
+      'other': '20-40 seconds'
     };
 
     return {
@@ -818,7 +944,7 @@ export const agentNetworkTool = createTool({
       status: 'queued',
       taskType,
       message: `Task has been queued for execution by the agent network. The CEO agent will analyze and delegate this ${taskType} task.`,
-      estimatedTime: estimatedTimes[taskType] || estimatedTimes.default,
+      estimatedTime: estimatedTimes[(taskType as 'web-search'|'slide-generation'|'weather'|'other')],
     };
   },
 });
