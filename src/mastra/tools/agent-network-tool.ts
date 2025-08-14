@@ -16,6 +16,7 @@ import { taskManagementTool } from '../task-management/tools/task-management-too
 import { batchTaskCreationTool } from '../task-management/tools/batch-task-creation-tool';
 import { directiveManagementTool } from '../task-management/tools/directive-management-tool';
 import { exaMCPSearchTool } from '../tools/exa-search-wrapper';
+import { docsReaderTool } from './docs-reader-tool';
 import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
 import { createAgentLogger } from '../utils/agent-logger';
 
@@ -266,7 +267,7 @@ const executeAgentNetwork = async (
       name: 'Worker Agent - Task Executor',
       instructions: getAgentPrompt('WORKER'),
       model: networkModel,
-      tools: { exaMCPSearchTool },
+      tools: { exaMCPSearchTool, docsReaderTool },
       memory: sharedMemory,
     });
 
@@ -789,36 +790,84 @@ As the CEO agent, analyze this task and provide strategic direction. The agent n
       executionTime: `${executionTime}s`,
     };
     
-    // ログストアのジョブを完了としてマーク
+    // ログストアのジョブを完了としてマーク（暫定）。この後に最終成果物の存在チェックを行う
     agentLogStore.completeJob(jobId, executionSummary);
     
-    // CEOエージェントが小タスクの結果を統合して最終成果物を生成・保存する
-    // agent-network-tool.tsではジョブステータスの更新のみ行う
-
-    logger.info(`エージェントネットワーク実行完了 jobId=${jobId} taskType=${inputData.taskType} time=${executionTime}s ts=${new Date().toISOString()}`);
-
-    // ジョブステータスのみ更新（結果の保存はCEOエージェントが行う）
-    updateJobStatus(jobId, 'completed');
-    logger.debug(`ジョブステータスを完了に更新 jobId=${jobId}`);
-    logger.debug('CEOエージェントが最終成果物を保存します');
-    
-    // タスク管理DBのステータスも更新
+    // --- 最終成果物の存在チェック & ヘルスチェック ---
     try {
-      const { getDAOs } = await import('../task-management/db/dao');
-      const daos = getDAOs();
-      await daos.tasks.updateStatus(jobId, 'completed');
-      
-      // 成果物として結果を保存（現在は無効化）
-      // TODO: artifactの保存を別の方法で実装
-      /*
-      if (inputData.taskType === 'slide-generation' && finalResult && typeof finalResult === 'object' && 'htmlCode' in finalResult) {
-        const slideResult = finalResult as { htmlCode: string; topic?: string; slideCount?: number; style?: string };
-        // artifact保存処理をここに実装
-        logger.debug('スライドHTMLの成果物保存はスキップ（将来実装予定）');
+      const fs = await import('fs');
+      const path = await import('path');
+      const JOB_RESULTS_DIR = path.join(process.cwd(), '.job-results');
+      const resultPath = path.join(JOB_RESULTS_DIR, `${jobId}.json`);
+
+      // ヘルスチェック: サブタスクが1件も作成されていない/保存されていない場合の検出
+      let hasAnySubtasks = false;
+      try {
+        const { getDAOs } = await import('../task-management/db/dao');
+        const daos = getDAOs();
+        const tasks = await daos.tasks.findByNetworkId(jobId);
+        const subTasks = tasks.filter(t => t.step_number !== null && t.step_number !== undefined);
+        hasAnySubtasks = subTasks.length > 0;
+        if (!hasAnySubtasks) {
+          console.warn(`⚠️ サブタスクが作成/保存されていません。networkId=${jobId}`);
+        }
+      } catch (e) {
+        console.warn('⚠️ ヘルスチェック中にエラーが発生しました（継続）:', e);
       }
-      */
-    } catch (dbError) {
-      console.warn('⚠️ タスク完了処理でエラー:', dbError);
+
+      const resultExists = fs.existsSync(resultPath);
+
+      // サブタスクが1件も無い場合は強制失敗
+      if (!hasAnySubtasks) {
+        const errorMessage = 'No subtasks were created/saved. Planning/execution may have failed.';
+        updateJobStatus(jobId, 'failed', { error: errorMessage });
+        try {
+          const { getDAOs } = await import('../task-management/db/dao');
+          const daos = getDAOs();
+          await daos.tasks.updateStatus(jobId, 'failed');
+        } catch (dbError) {
+          console.warn('⚠️ タスク失敗ステータス更新に失敗:', dbError);
+        }
+        console.error(`❌ サブタスク未作成のため失敗としてマーク: jobId=${jobId}`);
+        return;
+      }
+
+      if (resultExists) {
+        // 結果ファイルが存在する場合は completed に遷移
+        updateJobStatus(jobId, 'completed');
+        try {
+          const { getDAOs } = await import('../task-management/db/dao');
+          const daos = getDAOs();
+          await daos.tasks.updateStatus(jobId, 'completed');
+        } catch (dbError) {
+          console.warn('⚠️ タスク完了ステータス更新に失敗:', dbError);
+        }
+        logger.info(`エージェントネットワーク実行完了 jobId=${jobId} taskType=${inputData.taskType} time=${executionTime}s ts=${new Date().toISOString()}`);
+      } else {
+        // 結果が存在しない場合は failed に遷移し、エラーメッセージを保存
+        const errorMessage = 'Final result file not found. CEO may have failed to save the final result.';
+        updateJobStatus(jobId, 'failed', { error: errorMessage });
+        try {
+          const { getDAOs } = await import('../task-management/db/dao');
+          const daos = getDAOs();
+          await daos.tasks.updateStatus(jobId, 'failed');
+        } catch (dbError) {
+          console.warn('⚠️ タスク失敗ステータス更新に失敗:', dbError);
+        }
+        console.error(`❌ 最終成果物未保存のため失敗としてマーク: jobId=${jobId} message="${errorMessage}"`);
+      }
+    } catch (checkError) {
+      console.warn('⚠️ 最終成果物チェック中にエラーが発生しました（継続）:', checkError);
+      // チェック自体に失敗した場合は従来通り完了でマーク（保守的運用）
+      updateJobStatus(jobId, 'completed');
+      try {
+        const { getDAOs } = await import('../task-management/db/dao');
+        const daos = getDAOs();
+        await daos.tasks.updateStatus(jobId, 'completed');
+      } catch (dbError) {
+        console.warn('⚠️ タスク完了ステータス更新に失敗:', dbError);
+      }
+      logger.info(`エージェントネットワーク実行完了（チェック失敗のため既定完了） jobId=${jobId} time=${executionTime}s`);
     }
 
   } catch (error) {

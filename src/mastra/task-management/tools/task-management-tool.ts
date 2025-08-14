@@ -43,11 +43,25 @@ export const taskManagementTool = createTool({
     message: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ context, runtimeContext }) => {
     const startTime = Date.now();
     
     try {
       const { action, networkId, taskId, taskData, status, progress, result, workerId } = context;
+      
+      // networkId 一貫性チェック: runtimeContext.currentJobId が存在すれば照合
+      try {
+        const currentJobId = (runtimeContext as { get?: (key: string) => unknown })?.get?.('currentJobId') as string | undefined;
+        if (currentJobId && currentJobId !== networkId) {
+          return {
+            success: false,
+            action,
+            error: `Network ID mismatch. expected=${currentJobId} received=${networkId}`,
+          };
+        }
+      } catch {
+        // 取得失敗時はスキップ（後方互換）
+      }
       const daos = getDAOs();
       
       // Ensure response time < 100ms

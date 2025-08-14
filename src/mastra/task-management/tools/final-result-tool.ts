@@ -15,12 +15,21 @@ if (!fs.existsSync(JOB_RESULTS_DIR)) {
  * CEOエージェント専用ツール
  * ネットワーク全体の最終成果物を生成・保存
  */
+// タスクタイプ別の最終成果物スキーマ
+const SlideGenerationFinalResultSchema = z.object({
+  htmlCode: z.string().min(1, 'htmlCode is required and must be non-empty'),
+  topic: z.string().optional(),
+  slideCount: z.number().int().positive().optional(),
+  style: z.string().optional(),
+  generationTime: z.union([z.string(), z.number()]).optional(),
+}).describe('Final result for slide-generation task');
+
 export const finalResultTool = createTool({
   id: 'final-result-save',
   description: 'Generate and save the final result of the entire network task after consolidating sub-task results (CEO Agent only)',
   inputSchema: z.object({
     networkId: z.string().describe('The network ID (same as jobId)'),
-    taskType: z.string().describe('Type of the overall task'),
+    taskType: z.enum(['web-search', 'slide-generation', 'weather', 'other']).describe('Type of the overall task'),
     finalResult: z.any().describe('The consolidated final result/output of the network'),
     metadata: z.object({
       totalIterations: z.number().optional(),
@@ -33,6 +42,19 @@ export const finalResultTool = createTool({
         completed: z.boolean(),
       })).optional(),
     }).optional().describe('Additional metadata about the execution'),
+  }).superRefine((obj, ctx) => {
+    if (obj.taskType === 'slide-generation') {
+      const result = SlideGenerationFinalResultSchema.safeParse(obj.finalResult);
+      if (!result.success) {
+        for (const issue of result.error.issues) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `Invalid finalResult for slide-generation: ${issue.message}`,
+            path: ['finalResult', ...(issue.path ?? [])],
+          });
+        }
+      }
+    }
   }),
   outputSchema: z.object({
     success: z.boolean(),

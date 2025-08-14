@@ -33,11 +33,26 @@ export const policyManagementTool = createTool({
     networkId: z.string(),
     message: z.string(),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ context, runtimeContext }) => {
     const { action, networkId, policy } = context;
     
     try {
       const daos = getDAOs();
+
+      // networkId 一貫性チェック: runtimeContext.currentJobId が存在すれば照合
+      try {
+        const currentJobId = (runtimeContext as { get?: (key: string) => unknown })?.get?.('currentJobId') as string | undefined;
+        if (currentJobId && currentJobId !== networkId) {
+          return {
+            success: false,
+            action,
+            networkId,
+            message: `Network ID mismatch. expected=${currentJobId} received=${networkId}`,
+          };
+        }
+      } catch {
+        // 取得失敗時はスキップ（後方互換）
+      }
       
       // メインタスクを取得
       const mainTask = await daos.tasks.findById(networkId);
