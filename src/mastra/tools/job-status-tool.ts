@@ -1,6 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { jobStore } from '../services/job-store';
+import { ensureTaskDBInitialized } from '../task-management/db/init';
 
 // fs依存を廃止し、DBベースのJobStoreに移行
 
@@ -40,6 +41,7 @@ export const jobStatusTool = createTool({
     completedAt: z.string().optional(),
   }),
   execute: async ({ context }) => {
+    await ensureTaskDBInitialized();
     const { jobId } = context;
     
     // DB初期化遅延に対応

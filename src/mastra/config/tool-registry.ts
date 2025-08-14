@@ -37,6 +37,7 @@ export type AgentRole = 'GENERAL' | 'CEO' | 'MANAGER' | 'WORKER';
 
 // 役割ごとの既定ツールセット（将来はDB上書き可）
 export function getToolsForRole(role: AgentRole): Record<string, unknown> {
+  // TODO: 将来ここで agent_definitions を参照して tools を上書き
   switch (role) {
     case 'GENERAL':
       return {

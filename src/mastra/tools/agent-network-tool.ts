@@ -6,6 +6,7 @@ import { Agent } from '@mastra/core/agent';
 import { resolveModel } from '../config/model-registry';
 import { createRoleAgent } from '../agents/factory';
 import { buildNetwork } from '../networks/builder';
+import { resolveNetworkFromDB } from '../networks/resolver';
 import { sharedMemory } from '../shared-memory';
 import { getAgentPrompt } from '../prompts/agent-prompts';
 import { taskViewerTool } from '../task-management/tools/task-viewer-tool';
@@ -247,11 +248,18 @@ const executeAgentNetwork = async (
     // メモリを取得
     const memory = memoryConfig ? mastraTyped?.getMemory() : undefined;
     
-    // エージェントネットワークを作成
-    const agentNetwork = buildNetwork({
-      id: 'task-execution-network',
-      name: 'Task Execution Network',
-      instructions: `
+    // エージェントネットワークを作成（DB定義があれば優先採用。無ければ従来の固定構築）
+    let agentNetwork: InstanceType<typeof NewAgentNetwork>;
+    try {
+      const resolved = await resolveNetworkFromDB({ memory });
+      logger.info(`DB定義のネットワークを使用します id=${resolved.network.id}`);
+      agentNetwork = resolved.network as unknown as InstanceType<typeof NewAgentNetwork>;
+    } catch (e) {
+      logger.warn(`DB定義のネットワーク解決に失敗（フォールバックして固定構築）: ${String(e)}`);
+      agentNetwork = buildNetwork({
+        id: 'task-execution-network',
+        name: 'Task Execution Network',
+        instructions: `
 ## エージェントネットワーク実行フロー
 
 このネットワークはCEO-Manager-Workerの3つのエージェントが並列的な役割分担で協働します。
@@ -302,15 +310,16 @@ const executeAgentNetwork = async (
 - Managerは頻繁に追加指令を確認
 - 追加指令があればCEOが方針を修正
 `,
-      model: networkModel,
-      agents: {
-        ceo: ceoAgent as Agent,
-        manager: managerAgent as Agent,
-        worker: workerAgent as Agent,
-      },
-      defaultAgentId: 'manager',
-      memory,
-    });
+        model: networkModel,
+        agents: {
+          ceo: ceoAgent as Agent,
+          manager: managerAgent as Agent,
+          worker: workerAgent as Agent,
+        },
+        defaultAgentId: 'manager',
+        memory,
+      });
+    }
 
     // タスクコンテキストを準備
     let parsedParameters = inputData.taskParameters;

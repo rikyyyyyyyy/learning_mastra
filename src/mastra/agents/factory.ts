@@ -37,3 +37,45 @@ export function createRoleAgent(options: AgentFactoryOptions): Agent {
   return agent;
 }
 
+export interface AgentDefinitionInput {
+  id: string;
+  name: string;
+  role: RoleId;
+  modelKey?: string;
+  promptText?: string;
+  tools?: string[]; // toolRegistry のキー
+  memory?: unknown;
+}
+
+export function createAgentFromDefinition(def: AgentDefinitionInput): Agent {
+  const { aiModel, info } = resolveModel(def.modelKey);
+
+  const instructions = def.promptText ?? getAgentPrompt(def.role);
+
+  // ツール解決（指定があればそのセット、無ければ役割デフォルト）
+  const defaultTools = getToolsForRole(def.role);
+  let tools: Record<string, unknown> = defaultTools;
+  if (def.tools && def.tools.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const registry = require('../config/tool-registry') as any;
+    const selected: Record<string, unknown> = {};
+    def.tools.forEach((key) => {
+      if (registry.toolRegistry && registry.toolRegistry[key]) {
+        selected[key] = registry.toolRegistry[key];
+      }
+    });
+    tools = selected;
+  }
+
+  const agent = new Agent({
+    name: def.name,
+    instructions,
+    model: aiModel as AnyModel,
+    tools: tools as unknown as never,
+    memory: def.memory ?? sharedMemory,
+  });
+
+  (agent as { _modelInfo?: { provider: string; modelId: string; displayName: string } })._modelInfo = info;
+  return agent;
+}
+

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { agentLogStore, type AgentConversationEntry } from '@/src/mastra/utils/agent-log-store';
+import { logBus } from '@/src/mastra/services/log-bus';
 
 // SSEヘッダーの設定
 const SSE_HEADERS = {
@@ -62,6 +63,8 @@ export async function GET(
       const encoder = new TextEncoder();
       let isStreamClosed = false;
       let heartbeatInterval: NodeJS.Timeout | null = null;
+      // LogBus リスナーは後で代入（close時に外すための参照を保持）
+      let handleBusLog: ((event: any) => void) | null = null;
       
       // ストリームが閉じられているかチェックして安全にenqueueする
       const safeEnqueue = (data: Uint8Array): boolean => {
@@ -98,6 +101,9 @@ export async function GET(
         agentLogStore.off('log-added', handleLogAdded);
         agentLogStore.off('job-completed', handleJobCompleted);
         agentLogStore.off('job-failed', handleJobFailed);
+        if (handleBusLog) {
+          logBus.off('log', handleBusLog);
+        }
         
         // コントローラーを閉じる
         try {
@@ -178,10 +184,31 @@ export async function GET(
         }
       };
       
+      // LogBus（新基盤）からのイベントも転送
+      handleBusLog = (event: any) => {
+        if (event.jobId === jobId && !isStreamClosed) {
+          const message = formatSSEMessage('log-entry', {
+            jobId,
+            entry: {
+              agentId: event.agentId,
+              agentName: event.agentName,
+              message: event.message,
+              iteration: event.iteration ?? 0,
+              messageType: event.messageType,
+              metadata: event.metadata,
+              timestamp: event.timestamp,
+            },
+            timestamp: new Date().toISOString(),
+          });
+          safeEnqueue(encoder.encode(message));
+        }
+      };
+
       // イベントリスナーを登録
       agentLogStore.on('log-added', handleLogAdded);
       agentLogStore.on('job-completed', handleJobCompleted);
       agentLogStore.on('job-failed', handleJobFailed);
+      logBus.on('log', handleBusLog);
       
       // ハートビートを送信（30秒ごと）
       heartbeatInterval = setInterval(() => {

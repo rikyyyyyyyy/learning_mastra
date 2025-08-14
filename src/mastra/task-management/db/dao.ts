@@ -421,15 +421,163 @@ export class NetworkDirectiveDAO extends BaseDAO {
 // Export singleton instances
 let taskDAO: NetworkTaskDAO | null = null;
 let directiveDAO: NetworkDirectiveDAO | null = null;
+let agentDefDAO: AgentDefinitionDAO | null = null;
+let networkDefDAO: NetworkDefinitionDAO | null = null;
 
 export function getDAOs() {
   if (!taskDAO) {
     taskDAO = new NetworkTaskDAO();
     directiveDAO = new NetworkDirectiveDAO();
+    agentDefDAO = new AgentDefinitionDAO();
+    networkDefDAO = new NetworkDefinitionDAO();
   }
   
   return {
     tasks: taskDAO!,
     directives: directiveDAO!,
+    agentDefinitions: agentDefDAO!,
+    networkDefinitions: networkDefDAO!,
   };
+}
+
+// ============ New: Agent & Network Definitions DAOs ============
+
+export interface AgentDefinitionRow {
+  id: string;
+  name: string;
+  role: 'GENERAL' | 'CEO' | 'MANAGER' | 'WORKER';
+  model_key?: string | null;
+  prompt_text?: string | null;
+  enabled: number; // 1/0
+  tools?: string | null; // JSON
+  metadata?: string | null; // JSON
+  updated_at: string;
+}
+
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  role: 'GENERAL' | 'CEO' | 'MANAGER' | 'WORKER';
+  model_key?: string;
+  prompt_text?: string;
+  enabled: boolean;
+  tools?: string[];
+  metadata?: Record<string, unknown>;
+  updated_at: string;
+}
+
+export class AgentDefinitionDAO extends BaseDAO {
+  constructor() {
+    super('agent_definitions');
+  }
+
+  private parse(row: Record<string, unknown>): AgentDefinition {
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      role: row.role as AgentDefinition['role'],
+      model_key: (row.model_key as string | null) || undefined,
+      prompt_text: (row.prompt_text as string | null) || undefined,
+      enabled: ((row.enabled as number) ?? 1) === 1,
+      tools: row.tools ? JSON.parse(row.tools as string) : undefined,
+      metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async findAll(): Promise<AgentDefinition[]> {
+    const rows = await this.execute(`SELECT * FROM agent_definitions ORDER BY updated_at DESC`);
+    return (rows as Record<string, unknown>[]).map(r => this.parse(r));
+  }
+
+  async findById(id: string): Promise<AgentDefinition | null> {
+    const row = await this.executeOne(`SELECT * FROM agent_definitions WHERE id = ?`, [id]) as Record<string, unknown> | null;
+    return row ? this.parse(row) : null;
+  }
+
+  async upsert(def: Omit<AgentDefinition, 'updated_at'>): Promise<AgentDefinition> {
+    const now = new Date().toISOString();
+    await this.executeRun(
+      `INSERT INTO agent_definitions (id, name, role, model_key, prompt_text, enabled, tools, metadata, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name=excluded.name, role=excluded.role, model_key=excluded.model_key, prompt_text=excluded.prompt_text, enabled=excluded.enabled, tools=excluded.tools, metadata=excluded.metadata, updated_at=excluded.updated_at`,
+      [
+        def.id, def.name, def.role, def.model_key ?? null, def.prompt_text ?? null,
+        def.enabled ? 1 : 0, JSON.stringify(def.tools ?? null), JSON.stringify(def.metadata ?? null), now,
+      ]
+    );
+    const row = await this.executeOne(`SELECT * FROM agent_definitions WHERE id = ?`, [def.id]) as Record<string, unknown>;
+    return this.parse(row);
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.executeRun(`DELETE FROM agent_definitions WHERE id = ?`, [id]);
+  }
+}
+
+export interface NetworkDefinition {
+  id: string;
+  name: string;
+  agent_ids: string[]; // ordered
+  default_agent_id: string;
+  routing_preset?: string;
+  enabled: boolean;
+  updated_at: string;
+}
+
+export class NetworkDefinitionDAO extends BaseDAO {
+  constructor() {
+    super('network_definitions');
+  }
+
+  private parse(row: Record<string, unknown>): NetworkDefinition {
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      agent_ids: row.agent_ids ? JSON.parse(row.agent_ids as string) : [],
+      default_agent_id: row.default_agent_id as string,
+      routing_preset: (row.routing_preset as string | null) || undefined,
+      enabled: ((row.enabled as number) ?? 1) === 1,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async findAll(): Promise<NetworkDefinition[]> {
+    const rows = await this.execute(`SELECT * FROM network_definitions ORDER BY updated_at DESC`);
+    return (rows as Record<string, unknown>[]).map(r => this.parse(r));
+  }
+
+  async findById(id: string): Promise<NetworkDefinition | null> {
+    const row = await this.executeOne(`SELECT * FROM network_definitions WHERE id = ?`, [id]) as Record<string, unknown> | null;
+    return row ? this.parse(row) : null;
+  }
+
+  async findFirstEnabled(): Promise<NetworkDefinition | null> {
+    const row = await this.executeOne(`SELECT * FROM network_definitions WHERE enabled = 1 ORDER BY updated_at DESC LIMIT 1`) as Record<string, unknown> | null;
+    return row ? this.parse(row) : null;
+  }
+
+  async setActiveNetwork(id: string): Promise<void> {
+    // Disable all, then enable the selected one
+    await this.executeRun(`UPDATE network_definitions SET enabled = 0 WHERE id <> ?`, [id]);
+    await this.executeRun(`UPDATE network_definitions SET enabled = 1, updated_at = ? WHERE id = ?`, [new Date().toISOString(), id]);
+  }
+
+  async upsert(def: Omit<NetworkDefinition, 'updated_at'>): Promise<NetworkDefinition> {
+    const now = new Date().toISOString();
+    await this.executeRun(
+      `INSERT INTO network_definitions (id, name, agent_ids, default_agent_id, routing_preset, enabled, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name=excluded.name, agent_ids=excluded.agent_ids, default_agent_id=excluded.default_agent_id, routing_preset=excluded.routing_preset, enabled=excluded.enabled, updated_at=excluded.updated_at`,
+      [
+        def.id, def.name, JSON.stringify(def.agent_ids), def.default_agent_id, def.routing_preset ?? null, def.enabled ? 1 : 0, now,
+      ]
+    );
+    const row = await this.executeOne(`SELECT * FROM network_definitions WHERE id = ?`, [def.id]) as Record<string, unknown>;
+    return this.parse(row);
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.executeRun(`DELETE FROM network_definitions WHERE id = ?`, [id]);
+  }
 }
