@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { logBus } from '../services/log-bus';
 
 // エージェント会話エントリの型定義
 export interface AgentConversationEntry {
@@ -101,6 +102,17 @@ class AgentLogStore extends EventEmitter {
     console.log(`📤 [AgentLogStore] ログ追加: ${jobId} - ${entry.agentName}: ${entry.message.substring(0, 50)}... (リスナー数: ${listenerCount})`);
     
     this.emit('log-added', jobId, entry);
+    // 新ロギング基盤へも転送
+    void logBus.publish({
+      jobId,
+      agentId: entry.agentId,
+      agentName: entry.agentName,
+      message: entry.message,
+      iteration: entry.iteration,
+      messageType: entry.messageType,
+      metadata: entry.metadata as Record<string, unknown> | undefined,
+      timestamp: entry.timestamp || new Date().toISOString(),
+    });
   }
 
   // 複数のログエントリを一度に追加

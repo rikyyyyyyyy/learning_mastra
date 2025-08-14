@@ -9,6 +9,7 @@ import { managerAgent } from './agents/network/manager-agent';
 import { workerAgent } from './agents/network/worker-agent';
 // Task management
 import { initializeTaskManagementDB } from './task-management/db/migrations';
+import { logBus, ConsoleSink, DbSink } from './services/log-bus';
 
 // Create storage instance
 const storage = new LibSQLStore({
@@ -35,6 +36,9 @@ export const mastra = new Mastra({
 // Initialize task management database
 initializeTaskManagementDB(':memory:').then(() => {
   console.log('✅ Task management database initialized');
+  // ログシンクの初期化（Console + DB）
+  logBus.addSink(new ConsoleSink());
+  logBus.addSink(new DbSink());
 }).catch((error) => {
   console.error('❌ Failed to initialize task management database:', error);
 });

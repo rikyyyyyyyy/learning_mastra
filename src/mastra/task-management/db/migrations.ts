@@ -34,6 +34,11 @@ export class TaskManagementDB {
     const migrations = [
       { name: 'network_tasks', sql: SQL_SCHEMAS.network_tasks },
       { name: 'network_directives', sql: SQL_SCHEMAS.network_directives },
+      { name: 'job_status', sql: SQL_SCHEMAS.job_status },
+      { name: 'job_results', sql: SQL_SCHEMAS.job_results },
+      { name: 'agent_logs', sql: SQL_SCHEMAS.agent_logs },
+      { name: 'agent_definitions', sql: SQL_SCHEMAS.agent_definitions },
+      { name: 'network_definitions', sql: SQL_SCHEMAS.network_definitions },
     ];
 
     for (const migration of migrations) {

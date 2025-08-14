@@ -1,0 +1,39 @@
+import { Agent } from '@mastra/core/agent';
+import { sharedMemory } from '../shared-memory';
+import { getAgentPrompt } from '../prompts/agent-prompts';
+import { resolveModel, AnyModel } from '../config/model-registry';
+import { getToolsForRole } from '../config/tool-registry';
+
+export type RoleId = 'GENERAL' | 'CEO' | 'MANAGER' | 'WORKER';
+
+export interface AgentFactoryOptions {
+  role: RoleId;
+  modelKey?: string;
+  memory?: unknown; // NewAgentNetworkがDynamicArgumentを要求する環境もあるためunknownで受ける
+}
+
+export function createRoleAgent(options: AgentFactoryOptions): Agent {
+  const { role, modelKey, memory } = options;
+  const { aiModel, info } = resolveModel(modelKey);
+
+  const nameMap: Record<RoleId, string> = {
+    GENERAL: 'General AI Assistant',
+    CEO: 'CEO Agent - Strategic Task Director',
+    MANAGER: 'Manager Agent - Task Planner & Coordinator',
+    WORKER: 'Worker Agent - Task Executor',
+  };
+
+  const agent = new Agent({
+    name: nameMap[role],
+    instructions: getAgentPrompt(role),
+    model: aiModel as AnyModel,
+    tools: getToolsForRole(role) as unknown as never,
+    memory: memory ?? sharedMemory,
+  });
+
+  // デバッグ用モデル情報を付与（既存運用の互換）
+  (agent as { _modelInfo?: { provider: string; modelId: string; displayName: string } })._modelInfo = info;
+
+  return agent;
+}
+

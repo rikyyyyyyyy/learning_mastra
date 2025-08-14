@@ -19,7 +19,7 @@ export const jobResultTool = createTool({
   execute: async ({ context }) => {
     const { jobId } = context;
     
-    const jobResult = getJobResult(jobId);
+    const jobResult = await getJobResult(jobId);
     
     if (!jobResult) {
       return {

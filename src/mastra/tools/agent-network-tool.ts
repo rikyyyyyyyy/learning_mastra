@@ -2,11 +2,10 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
 import { NewAgentNetwork } from '@mastra/core/network/vNext';
-import { anthropic } from '@ai-sdk/anthropic';
-import { openai } from '@ai-sdk/openai';
-import { google } from '@ai-sdk/google';
 import { Agent } from '@mastra/core/agent';
-type AnyModel = ReturnType<typeof openai>;
+import { resolveModel } from '../config/model-registry';
+import { createRoleAgent } from '../agents/factory';
+import { buildNetwork } from '../networks/builder';
 import { sharedMemory } from '../shared-memory';
 import { getAgentPrompt } from '../prompts/agent-prompts';
 import { taskViewerTool } from '../task-management/tools/task-viewer-tool';
@@ -116,33 +115,34 @@ function inferAgentFromString(raw?: string): { id: 'ceo' | 'manager' | 'worker';
 }
 
 function inferAgentFromChunk(chunk: WorkflowStreamChunk): { id: string; name: string } | null {
-  // name/toolName
-  if ('name' in chunk && (chunk as Partial<ToolCallStartChunk | ToolCallChunk>).name) {
-    const g = inferAgentFromString((chunk as Partial<ToolCallStartChunk | ToolCallChunk>).name);
-    if (g) return g;
+  // ルーティングのメタデータ化: 明示的な agentId を優先
+  if ('data' in chunk && (chunk as Partial<AgentMessageChunk>).data) {
+    const d = (chunk as Partial<AgentMessageChunk>).data as { agentId?: string; name?: string };
+    if (d?.agentId) {
+      const id = d.agentId.toLowerCase();
+      const name = d.name || d.agentId;
+      return { id, name } as { id: string; name: string };
+    }
   }
-  if ('toolName' in chunk && (chunk as Partial<ToolResultChunk | ToolCallFinishChunk>).toolName) {
-    const g = inferAgentFromString((chunk as Partial<ToolResultChunk | ToolCallFinishChunk>).toolName);
-    if (g) return g;
-  }
-  // args.resourceId
-  if ('args' in chunk && (chunk as Partial<ToolCallStartChunk | ToolCallDeltaChunk>).args?.resourceId) {
-    const g = inferAgentFromString((chunk as Partial<ToolCallStartChunk | ToolCallDeltaChunk>).args?.resourceId);
-    if (g) return g;
-  }
-  // result.resourceId (if result is an object)
   if ('result' in chunk) {
     const r = (chunk as Partial<ToolResultChunk>).result as { resourceId?: string } | undefined;
     if (r?.resourceId) {
-      const g = inferAgentFromString(r.resourceId);
-      if (g) return g;
+      const id = r.resourceId.toLowerCase();
+      return { id, name: r.resourceId } as { id: string; name: string };
     }
   }
-  // data.agentId/name
-  if ('data' in chunk && (chunk as Partial<AgentMessageChunk>).data) {
-    const d = (chunk as Partial<AgentMessageChunk>).data;
-    const g = inferAgentFromString(d?.agentId || d?.name);
-    if (g) return g;
+  if ('args' in chunk && (chunk as Partial<ToolCallStartChunk | ToolCallDeltaChunk>).args?.resourceId) {
+    const id = (chunk as Partial<ToolCallStartChunk | ToolCallDeltaChunk>).args?.resourceId?.toLowerCase();
+    if (id) return { id, name: id } as { id: string; name: string };
+  }
+  // 最小限のフォールバック
+  if ('name' in chunk && (chunk as Partial<ToolCallStartChunk | ToolCallChunk>).name) {
+    const id = (chunk as Partial<ToolCallStartChunk | ToolCallChunk>).name!.toLowerCase();
+    return { id, name: (chunk as Partial<ToolCallStartChunk | ToolCallChunk>).name as string };
+  }
+  if ('toolName' in chunk && (chunk as Partial<ToolResultChunk | ToolCallFinishChunk>).toolName) {
+    const id = (chunk as Partial<ToolResultChunk | ToolCallFinishChunk>).toolName!.toLowerCase();
+    return { id, name: (chunk as Partial<ToolResultChunk | ToolCallFinishChunk>).toolName as string };
   }
   return null;
 }
@@ -228,48 +228,13 @@ const executeAgentNetwork = async (
 
     // 選択されたモデルをruntimeContextから取得し、対応するLanguageModelを解決
     const selectedModelType = (runtimeContext as { get: (key: string) => unknown })?.get?.('selectedModel') as string | undefined;
-
-    const resolveModel = (modelType?: string): { aiModel: AnyModel; info: { provider: string; modelId: string; displayName: string } } => {
-      switch (modelType) {
-        case 'gpt-5':
-          return { aiModel: openai('gpt-5'), info: { provider: 'OpenAI', modelId: 'gpt-5', displayName: 'GPT-5' } };
-        case 'openai-o3':
-          return { aiModel: openai('o3-2025-04-16'), info: { provider: 'OpenAI', modelId: 'o3-2025-04-16', displayName: 'OpenAI o3' } };
-        case 'gemini-2.5-flash':
-          return { aiModel: google('gemini-2.5-flash'), info: { provider: 'Google', modelId: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' } };
-        case 'claude-sonnet-4':
-        default:
-          return { aiModel: anthropic('claude-sonnet-4-20250514'), info: { provider: 'Anthropic', modelId: 'claude-sonnet-4-20250514', displayName: 'Claude Sonnet 4' } };
-      }
-    };
-
     const { aiModel: networkModel, info: networkModelInfo } = resolveModel(selectedModelType);
     logger.info(`エージェントネットワーク用モデル model=${networkModelInfo.displayName} provider=${networkModelInfo.provider}`);
 
-    // 選択モデルで各ロールのエージェントを動的生成
-    const ceoAgent = new Agent({
-      name: 'CEO Agent - Strategic Task Director',
-      instructions: getAgentPrompt('CEO'),
-      model: networkModel,
-      tools: { taskViewerTool, finalResultTool, policyManagementTool },
-      memory: sharedMemory,
-    });
-
-    const managerAgent = new Agent({
-      name: 'Manager Agent - Task Planner & Coordinator',
-      instructions: getAgentPrompt('MANAGER'),
-      model: networkModel,
-      tools: { taskManagementTool, batchTaskCreationTool, directiveManagementTool, policyCheckTool },
-      memory: sharedMemory,
-    });
-
-    const workerAgent = new Agent({
-      name: 'Worker Agent - Task Executor',
-      instructions: getAgentPrompt('WORKER'),
-      model: networkModel,
-      tools: { exaMCPSearchTool, docsReaderTool },
-      memory: sharedMemory,
-    });
+    // 選択モデルで各ロールのエージェントを動的生成（ファクトリ経由）
+    const ceoAgent = createRoleAgent({ role: 'CEO', modelKey: selectedModelType, memory: sharedMemory });
+    const managerAgent = createRoleAgent({ role: 'MANAGER', modelKey: selectedModelType, memory: sharedMemory });
+    const workerAgent = createRoleAgent({ role: 'WORKER', modelKey: selectedModelType, memory: sharedMemory });
 
     // メモリ設定を準備
     const resourceId = (runtimeContext as { get: (key: string) => unknown })?.get?.('resourceId') as string | undefined;
@@ -283,7 +248,7 @@ const executeAgentNetwork = async (
     const memory = memoryConfig ? mastraTyped?.getMemory() : undefined;
     
     // エージェントネットワークを作成
-    const agentNetwork = new NewAgentNetwork({
+    const agentNetwork = buildNetwork({
       id: 'task-execution-network',
       name: 'Task Execution Network',
       instructions: `
@@ -339,16 +304,12 @@ const executeAgentNetwork = async (
 `,
       model: networkModel,
       agents: {
-        'ceo': ceoAgent as Agent,
-        'manager': managerAgent as Agent,
-        'worker': workerAgent as Agent,
+        ceo: ceoAgent as Agent,
+        manager: managerAgent as Agent,
+        worker: workerAgent as Agent,
       },
-      defaultAgent: managerAgent as Agent,
-      // memoryはDynamicArgument型（関数）を要求される環境があるため、関数ラッパで適合させる
-      // NewAgentNetwork の DynamicArgument 署名に合わせる（未使用引数は破棄）。
-      memory: memory
-        ? ((() => memory) as unknown as never)
-        : undefined,
+      defaultAgentId: 'manager',
+      memory,
     });
 
     // タスクコンテキストを準備

@@ -102,4 +102,65 @@ export const SQL_SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_network_directives_status ON network_directives(status);
     CREATE INDEX IF NOT EXISTS idx_network_directives_created_at ON network_directives(created_at);
   `
+  ,
+  job_status: `
+    CREATE TABLE IF NOT EXISTS job_status (
+      job_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'paused')),
+      error TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      metadata TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_status_status ON job_status(status);
+    CREATE INDEX IF NOT EXISTS idx_job_status_started_at ON job_status(started_at);
+  `,
+  job_results: `
+    CREATE TABLE IF NOT EXISTS job_results (
+      job_id TEXT PRIMARY KEY,
+      workflow_id TEXT,
+      result TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_results_created_at ON job_results(created_at);
+  `,
+  agent_logs: `
+    CREATE TABLE IF NOT EXISTS agent_logs (
+      log_id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      agent_id TEXT,
+      agent_name TEXT,
+      message TEXT,
+      iteration INTEGER,
+      message_type TEXT,
+      metadata TEXT,
+      timestamp TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_logs_job ON agent_logs(job_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_logs_time ON agent_logs(timestamp);
+  `,
+  agent_definitions: `
+    CREATE TABLE IF NOT EXISTS agent_definitions (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('GENERAL','CEO','MANAGER','WORKER')),
+      model_key TEXT,
+      prompt_text TEXT,
+      enabled INTEGER DEFAULT 1,
+      tools TEXT,
+      metadata TEXT,
+      updated_at TEXT NOT NULL
+    );
+  `,
+  network_definitions: `
+    CREATE TABLE IF NOT EXISTS network_definitions (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      agent_ids TEXT NOT NULL,
+      default_agent_id TEXT NOT NULL,
+      routing_preset TEXT,
+      enabled INTEGER DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+  `
 };
