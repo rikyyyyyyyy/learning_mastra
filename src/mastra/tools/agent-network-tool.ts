@@ -8,15 +8,6 @@ import { createRoleAgent } from '../agents/factory';
 import { buildNetwork } from '../networks/builder';
 import { resolveNetworkFromDB } from '../networks/resolver';
 import { sharedMemory } from '../shared-memory';
-import { getAgentPrompt } from '../prompts/agent-prompts';
-import { taskViewerTool } from '../task-management/tools/task-viewer-tool';
-import { finalResultTool } from '../task-management/tools/final-result-tool';
-import { policyManagementTool, policyCheckTool } from '../task-management/tools/policy-management-tool';
-import { taskManagementTool } from '../task-management/tools/task-management-tool';
-import { batchTaskCreationTool } from '../task-management/tools/batch-task-creation-tool';
-import { directiveManagementTool } from '../task-management/tools/directive-management-tool';
-import { exaMCPSearchTool } from '../tools/exa-search-wrapper';
-import { docsReaderTool } from './docs-reader-tool';
 import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
 import { createAgentLogger } from '../utils/agent-logger';
 
@@ -260,55 +251,21 @@ const executeAgentNetwork = async (
         id: 'task-execution-network',
         name: 'Task Execution Network',
         instructions: `
-## エージェントネットワーク実行フロー
+## エージェントネットワーク
 
-このネットワークはCEO-Manager-Workerの3つのエージェントが並列的な役割分担で協働します。
-3者は上下関係ではなく、それぞれが専門的な役割を持つ並列的な関係です。
+CEO-Manager-Workerが並列的な役割分担で協働します。
 
-### 全体の流れ：
+CEO:タスクの方針の決定者
+Manager:タスクの分解(小タスクの生成と小タスク結果の保存)
+Worker:タスクの実行
 
-1. **開始時（Managerがデフォルト）**
-   - Managerがタスクを受信
-   - 方針が未決定の場合、CEOに方針決定を要請
+### 実行フロー
+1. Manager: タスク受信→方針未決定ならCEOへ要請
+2. CEO: 方針決定/修正/最終成果物生成
+3. Manager: 5-6個の小タスクに分解→順次Worker指示→結果保存
+4. Worker: タスク実行→結果返却→次の指示待機
+5. 完了: Manager「全タスク完了」→CEO最終成果物保存
 
-2. **CEO方針決定**
-   - 方針が未決定の場合：全体方針を決定・提示
-   - 追加指令が報告された場合：方針を修正
-   - 全タスク完了が報告された場合：最終成果物を生成・保存
-   - 上記以外の場合は応答しない
-
-3. **Manager タスク管理**
-   - CEO方針に基づきタスクを実行可能な小タスクに分解
-   - batchTaskCreationToolでタスクリストをDBに保存
-   - 頻繁に追加指令DBを確認（directiveManagementTool）
-   - Workerに個別タスクを順番に指示
-   - 各タスクの結果をツールでDBに格納
-
-4. **Worker 段階的実行**
-   - Managerが作成したタスクリストに従って実行
-   - 一つのタスクが終わったら必ずManagerに報告
-   - Managerが結果を保存するまで待機
-   - 次のタスクの指示を受けて継続
-
-5. **結果管理と完了**
-   - Managerが各タスクの結果をDBに格納
-   - 全タスク完了後、Managerが「全タスク完了」をCEOに報告
-   - CEOがtaskViewerToolで小タスクの結果を閲覧
-   - CEOが小タスクの結果を統合して最終成果物を生成
-   - CEOがfinalResultToolで最終成果物を保存（General Agentが取得可能）
-
-### ルーティングルール：
-- Manager → CEO：方針が未決定の場合、追加指令がある場合、全タスク完了時
-- CEO → Manager：方針決定後・更新後は必ずManagerに委譲
-- Manager → Worker：個別タスク実行が必要な場合
-- Worker → Manager：タスク完了時は必ずManagerに報告
-- CEO → Network完了：最終成果物保存後（finalResultTool実行後）
-
-### 重要なポイント：
-- 各エージェントは並列的な役割分担（上下関係なし）
-- Workerは必ず一つのタスクごとにManagerに報告
-- Managerは頻繁に追加指令を確認
-- 追加指令があればCEOが方針を修正
 `,
         model: networkModel,
         agents: {
@@ -332,20 +289,17 @@ const executeAgentNetwork = async (
     }
 
     const networkPrompt = `
-Execute the following task:
+タスク実行:
 Network ID: ${jobId}
 Type: ${inputData.taskType}
 Description: ${inputData.taskDescription}
 Parameters: ${JSON.stringify(parsedParameters, null, 2)}
-${inputData.context?.expectedOutput ? `Expected Output: ${inputData.context.expectedOutput}` : ''}
-${inputData.context?.constraints ? `Constraints: ${JSON.stringify(inputData.context.constraints)}` : ''}
-${inputData.context?.additionalInstructions ? `Additional Instructions: ${inputData.context.additionalInstructions}` : ''}
+${inputData.context?.expectedOutput ? `期待出力: ${inputData.context.expectedOutput}` : ''}
+${inputData.context?.constraints ? `制約: ${JSON.stringify(inputData.context.constraints)}` : ''}
+${inputData.context?.additionalInstructions ? `追加指示: ${inputData.context.additionalInstructions}` : ''}
+優先度: ${inputData.context?.priority || 'medium'}
 
-Priority: ${inputData.context?.priority || 'medium'}
-
-IMPORTANT: When creating tasks in the database, use the Network ID "${jobId}" for all tasks in this network.
-
-As the CEO agent, analyze this task and provide strategic direction. The agent network will automatically route your guidance to the appropriate agents for planning and execution.
+重要: Network ID "${jobId}"を使用してタスクを管理すること。
 `;
 
     logger.debug(`ネットワークプロンプト preview=${networkPrompt.substring(0, 400)}`);

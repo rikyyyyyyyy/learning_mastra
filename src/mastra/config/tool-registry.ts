@@ -11,6 +11,7 @@ import { batchTaskCreationTool } from '../task-management/tools/batch-task-creat
 import { policyCheckTool } from '../task-management/tools/policy-management-tool';
 import { policyManagementTool } from '../task-management/tools/policy-management-tool';
 import { taskViewerTool } from '../task-management/tools/task-viewer-tool';
+import { finalResultTool } from '../task-management/tools/final-result-tool';
 // Worker向け
 import { exaMCPSearchTool } from '../tools/exa-search-wrapper';
 import { docsReaderTool } from '../tools/docs-reader-tool';
@@ -29,6 +30,7 @@ export const toolRegistry = {
   policyCheckTool,
   policyManagementTool,
   taskViewerTool,
+  finalResultTool,
   exaMCPSearchTool,
   docsReaderTool,
 };
@@ -47,11 +49,14 @@ export function getToolsForRole(role: AgentRole): Record<string, unknown> {
         jobResultTool,
         taskRegistryTool,
         directiveManagementTool,
+        docsReaderTool,
       };
     case 'CEO':
       return {
         taskViewerTool,
         policyManagementTool,
+        finalResultTool,
+        docsReaderTool,
       };
     case 'MANAGER':
       return {
@@ -59,6 +64,7 @@ export function getToolsForRole(role: AgentRole): Record<string, unknown> {
         batchTaskCreationTool,
         directiveManagementTool,
         policyCheckTool,
+        docsReaderTool,
       };
     case 'WORKER':
       return {
