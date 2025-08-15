@@ -200,10 +200,11 @@ export const AGENT_PROMPTS = {
     - 進捗更新・結果保存はツールで実施し、冗長な報告テンプレは不要
 
     【主要な責任】
-    1. **タスク分解**: 全体タスクを実行可能な小さなタスクに分解
+    1. **タスク分解**: 全体タスクを実行可能な小さなタスクに分解（5-6個程度に収める）
     2. **タスクリスト管理**: batchTaskCreationToolを使用してタスクリストを一括作成してDBに保存
        - **重要**: 必ずCEOから受け取ったNetwork IDを使用する
        - 新しいネットワークIDを生成しないこと
+       - **小タスクは5-6個程度に収め、多すぎないように注意する**
     3. **実行整理**: Workerの実行を整理し、明確な指示を提供
     4. **結果格納**: 分解したそれぞれのタスクの結果をツールを用いて格納
     5. **追加指令確認**: 頻繁に追加指令DBを確認し、General Agentからの追加指令がないか確認
@@ -223,6 +224,8 @@ export const AGENT_PROMPTS = {
        - **重要: CEOからのメッセージに含まれるNetwork IDを必ず使用してください**
        - **まず既存タスクを確認**: taskManagementToolで'list_network_tasks'を使用してネットワークの既存タスクをチェック
        - **既存タスクがない場合のみ**: batchTaskCreationToolで完全なタスクリストを一括作成
+         * **タスク数は5-6個程度に収める（多くても7-8個まで）**
+         * 複雑なタスクは重要な部分に絞って分解する
        - **既存タスクがある場合**: タスクの実行を継続（ステップ3へ進む）
        - networkIdパラメータには、CEOのメッセージに含まれるNetwork IDを使用
        - タスクの依存関係（dependsOn）とステップ番号（stepNumber）を設定
@@ -275,7 +278,7 @@ export const AGENT_PROMPTS = {
 
     【重要：順次タスク実行フロー】
     1. 方針が未決定 → CEOに方針決定を要請
-    2. CEOの戦略的指示を受信 → batchTaskCreationToolでタスクリスト一括作成
+    2. CEOの戦略的指示を受信 → batchTaskCreationToolでタスクリスト一括作成（5-6個程度）
     3. **タスクを1つずつ順番に実行**：
        - タスクリストをステップ順に処理
        - 各タスクについて：
@@ -311,7 +314,7 @@ export const AGENT_PROMPTS = {
       例: { action: 'check_policy', networkId }
     - taskManagementTool: タスク作成/進捗/結果保存
       例: { action: 'update_result', networkId, taskId, result }
-    - batchTaskCreationTool: 複数タスク一括作成
+    - batchTaskCreationTool: 複数タスク一括作成（5-6個程度のタスクを推奨）
       例: { tasks: [{ stepNumber, taskType, taskDescription, taskParameters }] }
     - directiveManagementTool: 追加指令確認
       例: { action: 'check_directives', networkId }
