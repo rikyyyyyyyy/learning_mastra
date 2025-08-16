@@ -191,6 +191,11 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
 
         // 追加指示の確認（単純化: 1回チェックし、pendingがあればCEOがupdate）
         const directives = await directiveManagementTool.execute({ context: { action: 'check_directives', networkId: jobId }, runtimeContext: rc });
+
+        // 再計画の制御フラグと開始ステップ
+        let replanTriggered = false;
+        let startingStepNumber = 1;
+
         if (directives.hasPending) {
           const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel });
           const { text } = await ceo.generate([
@@ -218,6 +223,29 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
               jobId,
               formatAgentMessage('ceo', 'CEO Agent', '追加指示を反映して方針を更新しました。', 2, 'response')
             );
+
+            // 完了済み以外を起点ステップ以降で削除し、以降を再計画する
+            try {
+              const listBefore = await taskManagementTool.execute({ context: { action: 'list_network_tasks', networkId: jobId }, runtimeContext: rc });
+              const existingTasks = (listBefore.tasks as Array<{ status: string; stepNumber?: number }> | undefined) || [];
+              const completedSteps = existingTasks
+                .filter(t => t.status === 'completed' && typeof t.stepNumber === 'number')
+                .map(t => (t.stepNumber as number));
+              const lastCompletedStep = completedSteps.length > 0 ? Math.max(...completedSteps) : 0;
+              const fromStep = lastCompletedStep + 1;
+
+              await taskManagementTool.execute({ context: { action: 'delete_tasks_from_step', networkId: jobId, fromStepNumber: fromStep }, runtimeContext: rc });
+
+              startingStepNumber = fromStep;
+              replanTriggered = true;
+
+              agentLogStore.addLogEntry(
+                jobId,
+                formatAgentMessage('manager', 'Manager Agent', `方針更新に伴い、ステップ${fromStep}以降の未完了タスクを削除しました。`, 2, 'internal')
+              );
+            } catch (cleanupErr) {
+              console.warn('⚠️ タスク再構成に失敗（継続）:', cleanupErr);
+            }
           }
         }
 
@@ -253,13 +281,13 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           ];
         }
 
-        // priority/stepNumberを正規化
+        // priority/stepNumberを正規化（再計画時は最後の完了ステップ+1から通しで振り直し）
         const normalizedTasks = tasks.map((t, i) => ({
           taskType: t.taskType,
           taskDescription: t.taskDescription,
           taskParameters: t.taskParameters,
           priority: (t.priority ?? 'medium') as 'low' | 'medium' | 'high',
-          stepNumber: t.stepNumber ?? i + 1,
+          stepNumber: replanTriggered ? (startingStepNumber + i) : (t.stepNumber ?? i + 1),
         }));
 
         const res = await batchTaskCreationTool.execute({ context: { networkId: jobId, tasks: normalizedTasks, autoAssign: false }, runtimeContext: rc });
@@ -269,7 +297,9 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           formatAgentMessage(
             'manager',
             'Manager Agent',
-            `サブタスクを作成しました (${res.totalTasks} 件)。`,
+            replanTriggered
+              ? `方針更新後の再計画としてサブタスクを作成しました (${res.totalTasks} 件)。`
+              : `サブタスクを作成しました (${res.totalTasks} 件)。`,
             2,
             'response'
           )

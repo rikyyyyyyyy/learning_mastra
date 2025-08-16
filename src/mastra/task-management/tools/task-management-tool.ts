@@ -19,6 +19,7 @@ export const taskManagementTool = createTool({
       'get_network_summary',
       'get_pending_tasks',
       'get_next_task',
+      'delete_tasks_from_step',
     ]),
     networkId: z.string().describe('Network ID for the agent network'),
     taskId: z.string().optional().describe('Task ID for operations that require it'),
@@ -33,6 +34,7 @@ export const taskManagementTool = createTool({
     progress: z.number().min(0).max(100).optional().describe('Progress percentage'),
     result: z.any().optional().describe('Task execution result'),
     workerId: z.string().optional().describe('Worker ID for assignment'),
+    fromStepNumber: z.number().int().positive().optional().describe('Delete tasks from this step number (inclusive) if not completed'),
   }),
   outputSchema: z.object({
     success: z.boolean(),
@@ -226,6 +228,7 @@ export const taskManagementTool = createTool({
               assignedTo: t.assigned_to,
               createdAt: t.created_at,
               completedAt: t.completed_at,
+              stepNumber: t.step_number,
             })),
             message: `Found ${tasks.length} tasks in network ${networkId}`,
           };
@@ -282,6 +285,22 @@ export const taskManagementTool = createTool({
               createdAt: t.created_at,
             })),
             message: `Found ${tasks.length} pending tasks in network ${networkId}`,
+          };
+        }
+
+        case 'delete_tasks_from_step': {
+          if (!context.fromStepNumber) {
+            return {
+              success: false,
+              action,
+              error: 'Missing required field: fromStepNumber',
+            };
+          }
+          await daos.tasks.deleteTasksFromStep(networkId, context.fromStepNumber);
+          return {
+            success: true,
+            action,
+            message: `Deleted tasks from step ${context.fromStepNumber} (inclusive) for network ${networkId}, excluding completed tasks`,
           };
         }
 

@@ -238,6 +238,17 @@ export class NetworkTaskDAO extends BaseDAO {
     await this.executeRun(query, [JSON.stringify(metadata), now, taskId]);
   }
 
+  // 追加: 指定したステップ番号以降の未完了タスクを削除（完了済みは保持）
+  async deleteTasksFromStep(networkId: string, fromStepNumber: number): Promise<void> {
+    const query = `
+      DELETE FROM network_tasks
+      WHERE network_id = ?
+        AND (step_number IS NULL OR step_number >= ?)
+        AND status != 'completed'
+    `;
+    await this.executeRun(query, [networkId, fromStepNumber]);
+  }
+
   async getNetworkSummary(networkId: string): Promise<{
     total: number;
     queued: number;
