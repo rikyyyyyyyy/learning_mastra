@@ -107,6 +107,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState<AIModel>("claude-sonnet-4");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [toolMode, setToolMode] = useState<'network'|'workflow'|'both'>('both');
   const [showSlidePreview, setShowSlidePreview] = useState(false);
   const [currentSlidePreview, setCurrentSlidePreview] = useState<{
     jobId: string;
@@ -750,6 +751,7 @@ export default function ChatPage() {
           message: inputValue,
           threadId: threadIdRef.current, // threadIdを送信
           model: selectedModel, // 選択されたモデルを送信
+          toolMode,
         }),
       });
 
@@ -923,6 +925,22 @@ export default function ChatPage() {
               <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
                 AI アシスタント
               </h1>
+            </div>
+            
+            {/* ツールモード切替 */}
+            <div className="relative">
+              <div className="flex items-center gap-2 px-2 py-2 bg-secondary text-foreground rounded-xl border">
+                <label className="text-sm">モード</label>
+                <select
+                  className="bg-transparent outline-none text-sm"
+                  value={toolMode}
+                  onChange={(e) => setToolMode(e.target.value as 'network'|'workflow'|'both')}
+                >
+                  <option value="both">両方</option>
+                  <option value="network">ネットワーク</option>
+                  <option value="workflow">ワークフロー</option>
+                </select>
+              </div>
             </div>
             <div className="flex items-center gap-3">
             {/* モデル選択ドロップダウン */}

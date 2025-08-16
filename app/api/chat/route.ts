@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     
     console.log("Chat API: User authenticated:", user.id);
 
-    const { message, threadId, model } = await req.json();
+    const { message, threadId, model, toolMode } = await req.json();
 
     if (!message) {
       console.log("Chat API: Message is required");
@@ -28,9 +28,10 @@ export async function POST(req: NextRequest) {
     console.log("Chat API: Message received:", message);
     console.log("Chat API: ThreadId:", threadId);
     console.log("Chat API: Selected model:", model || "claude-sonnet-4");
+    console.log("Chat API: Tool mode:", toolMode || "both");
 
     // Create agent with selected model
-    const agent = createGeneralAgent(model || 'claude-sonnet-4');
+    const agent = createGeneralAgent(model || 'claude-sonnet-4', (toolMode as 'network'|'workflow'|'both') || 'both');
     
     // モデル情報を取得してログ出力
     const modelInfo = (agent as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
     runtimeContext.set('threadId', threadId || `thread-${Date.now()}`);
     // 選択モデルをネットワーク側に伝播
     if (model) runtimeContext.set('selectedModel', model);
+    if (toolMode) runtimeContext.set('toolMode', toolMode);
     
     console.log("Chat API: RuntimeContext created with resourceId:", user.id, "threadId:", threadId || `thread-${Date.now()}`);
 
@@ -168,6 +170,19 @@ export async function POST(req: NextRequest) {
                 } else {
                   console.error(`❌ jobIdが見つかりません。結果:`, output);
                   console.error(`❌ chunk全体:`, JSON.stringify(chunk, null, 2));
+                }
+              }
+
+              // workflow-orchestratorの結果を処理
+              if (chunk.toolName === 'workflow-orchestrator' || chunk.toolName === 'workflowOrchestratorTool') {
+                console.log(`🧩 ワークフローツール検出 (名前: ${chunk.toolName})`);
+                const output = (chunk as unknown as { output?: Record<string, unknown> }).output;
+                if (output && typeof output === 'object' && 'jobId' in output && output.jobId) {
+                  const jobId = String(output.jobId);
+                  const taskType = String((output as Record<string, unknown>)['taskType'] ?? 'unknown');
+                  const event = JSON.stringify({ type: 'agent-network-job', jobId, taskType }) + '\n';
+                  controller.enqueue(encoder.encode(event));
+                  console.log(`📡 workflow-jobイベントを送信: ${jobId}`);
                 }
               }
               

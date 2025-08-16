@@ -130,6 +130,20 @@ export class NetworkTaskDAO extends BaseDAO {
     return results.map((r) => this.parseTask(r));
   }
 
+  // 次に実行すべきキュータスクをステップ番号昇順で取得
+  async findNextQueuedByStep(networkId: string): Promise<NetworkTask | null> {
+    const query = `
+      SELECT * FROM network_tasks 
+      WHERE network_id = ? AND status = 'queued'
+      ORDER BY 
+        CASE WHEN step_number IS NULL THEN 999999 ELSE step_number END ASC,
+        created_at ASC
+      LIMIT 1
+    `;
+    const result = await this.executeOne(query, [networkId]) as Record<string, unknown> | null;
+    return result ? this.parseTask(result) : null;
+  }
+
   async findByAssignedWorker(workerId: string): Promise<NetworkTask[]> {
     const query = 'SELECT * FROM network_tasks WHERE assigned_to = ? AND status IN (\'queued\', \'running\') ORDER BY priority DESC, created_at ASC';
     const results = await this.execute(query, [workerId]) as Record<string, unknown>[];

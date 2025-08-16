@@ -10,6 +10,7 @@ import { workerAgent } from './agents/network/worker-agent';
 // Task management
 import { initializeTaskManagementDB } from './task-management/db/migrations';
 import { logBus, ConsoleSink, DbSink } from './services/log-bus';
+import { ceoManagerWorkerWorkflow } from './workflows/task-workflow-v2';
 
 // Create storage instance
 const storage = new LibSQLStore({
@@ -18,7 +19,9 @@ const storage = new LibSQLStore({
 });
 
 export const mastra = new Mastra({
-  workflows: {},
+  workflows: {
+    'ceo-manager-worker-workflow': ceoManagerWorkerWorkflow,
+  },
   agents: { 
     generalAgent,
     // New network agents

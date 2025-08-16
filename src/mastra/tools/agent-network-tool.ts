@@ -325,7 +325,9 @@ ${inputData.context?.additionalInstructions ? `追加指示: ${inputData.context
     
     logger.debug(`エージェントネットワーク実行オプション maxIterations=${networkOptions.maxIterations} debug=${networkOptions.debug} stream=${networkOptions.stream}`);
     
-    // CEOが最終成果物を管理するため result は不要
+    // ここでは最終成果物ファイルの存在のみで完了判定していたが、
+    // ワークフロー/非同期保存のタイミング差で早期完了/失敗扱いになるのを避けるため、
+    // 最低限の小タスク作成確認と、リトライを伴う最終成果物チェックに変更
     const conversationHistory: import('../utils/agent-log-store').AgentConversationEntry[] = [];
     let iterationCounter = 1;
     
@@ -717,7 +719,7 @@ ${inputData.context?.additionalInstructions ? `追加指示: ${inputData.context
     // ログストアのジョブを完了としてマーク（暫定）。この後に最終成果物の存在チェックを行う
     agentLogStore.completeJob(jobId, executionSummary);
     
-    // --- 最終成果物の存在チェック & ヘルスチェック ---
+    // --- 最終成果物の存在チェック & ヘルスチェック（リトライ） ---
     try {
       const fs = await import('fs');
       const path = await import('path');
@@ -739,8 +741,6 @@ ${inputData.context?.additionalInstructions ? `追加指示: ${inputData.context
         console.warn('⚠️ ヘルスチェック中にエラーが発生しました（継続）:', e);
       }
 
-      const resultExists = fs.existsSync(resultPath);
-
       // サブタスクが1件も無い場合は強制失敗
       if (!hasAnySubtasks) {
         const errorMessage = 'No subtasks were created/saved. Planning/execution may have failed.';
@@ -754,6 +754,16 @@ ${inputData.context?.additionalInstructions ? `追加指示: ${inputData.context
         }
         console.error(`❌ サブタスク未作成のため失敗としてマーク: jobId=${jobId}`);
         return;
+      }
+
+      // 最終成果物の存在を最大3回（合計~3秒）リトライして確認
+      let resultExists = fs.existsSync(resultPath);
+      if (!resultExists) {
+        for (let i = 0; i < 3; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          resultExists = fs.existsSync(resultPath);
+          if (resultExists) break;
+        }
       }
 
       if (resultExists) {

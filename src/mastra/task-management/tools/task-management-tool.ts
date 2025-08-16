@@ -18,6 +18,7 @@ export const taskManagementTool = createTool({
       'list_network_tasks',
       'get_network_summary',
       'get_pending_tasks',
+      'get_next_task',
     ]),
     networkId: z.string().describe('Network ID for the agent network'),
     taskId: z.string().optional().describe('Task ID for operations that require it'),
@@ -241,6 +242,31 @@ export const taskManagementTool = createTool({
           };
         }
 
+        case 'get_next_task': {
+          const task = await daos.tasks.findNextQueuedByStep(networkId);
+          if (!task) {
+            return {
+              success: true,
+              action,
+              task: null,
+              message: `No queued tasks for network ${networkId}`,
+            };
+          }
+          return {
+            success: true,
+            action,
+            task: {
+              taskId: task.task_id,
+              taskType: task.task_type,
+              description: task.task_description,
+              stepNumber: task.step_number,
+              priority: task.priority,
+              createdAt: task.created_at,
+            },
+            message: `Next task is ${task.task_id}`,
+          };
+        }
+
         case 'get_pending_tasks': {
           const tasks = await daos.tasks.findByNetworkAndStatus(networkId, 'queued');
           
@@ -251,6 +277,7 @@ export const taskManagementTool = createTool({
               taskId: t.task_id,
               taskType: t.task_type,
               description: t.task_description,
+              stepNumber: t.step_number,
               priority: t.priority,
               createdAt: t.created_at,
             })),

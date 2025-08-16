@@ -94,52 +94,43 @@ export const batchTaskCreationTool = createTool({
         };
       });
       
-      // Schedule async database operations
-      setTimeout(async () => {
-        try {
-          // Create all tasks in parallel
-          const createPromises = taskDataList.map(taskData => 
-            daos.tasks.create(taskData).catch(err => {
-              console.error(`Failed to create task ${taskData.task_id}:`, err);
-              return null;
-            })
-          );
-          
-          const results = await Promise.all(createPromises);
-          const successCount = results.filter(r => r !== null).length;
-          
-          console.log(`✅ Batch created ${successCount}/${taskDataList.length} tasks for network ${networkId}`);
-          
-          // Update network metadata with task plan
-          const networkSummary = {
-            totalTasks: taskDataList.length,
-            taskPlan: taskDataList.map(t => ({
-              step: t.step_number,
-              type: t.task_type,
-              description: t.task_description,
-              priority: t.priority,
-              dependsOn: t.depends_on,
-            })),
-            createdAt: new Date().toISOString(),
-          };
-          
-          // Store network summary for UI display
-          await daos.tasks.updateMetadata?.(networkId, networkSummary as unknown as Record<string, unknown>).catch(err => {
-            console.error('Failed to update network metadata:', err);
-          });
-          
-        } catch (error) {
-          console.error('Batch task creation background error:', error);
-        }
-      }, 0);
-      
-      // Return immediately with task IDs
+      // 同期で作成（ワークフロー/ネットワークが直後に利用できるようにする）
+      const results = await Promise.all(
+        taskDataList.map(taskData =>
+          daos.tasks.create(taskData).catch(err => {
+            console.error(`Failed to create task ${taskData.task_id}:`, err);
+            return null;
+          })
+        )
+      );
+
+      const successCount = results.filter(r => r !== null).length;
+      console.log(`✅ Batch created ${successCount}/${taskDataList.length} tasks for network ${networkId}`);
+
+      // Update network metadata with task plan（存在しない場合は無視）
+      try {
+        const networkSummary = {
+          totalTasks: taskDataList.length,
+          taskPlan: taskDataList.map(t => ({
+            step: t.step_number,
+            type: t.task_type,
+            description: t.task_description,
+            priority: t.priority,
+            dependsOn: t.depends_on,
+          })),
+          createdAt: new Date().toISOString(),
+        };
+        await daos.tasks.updateMetadata?.(networkId, networkSummary as unknown as Record<string, unknown>);
+      } catch (err) {
+        console.error('Failed to update network metadata:', err);
+      }
+
       return {
         success: true,
         createdTasks: createdTaskIds,
         networkId,
-        totalTasks: tasks.length,
-        message: `Batch creation initiated for ${tasks.length} tasks in network ${networkId}`,
+        totalTasks: successCount,
+        message: `Batch created ${successCount} tasks in network ${networkId}`,
       };
       
     } catch (error) {

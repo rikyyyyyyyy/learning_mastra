@@ -15,11 +15,13 @@ import { finalResultTool } from '../task-management/tools/final-result-tool';
 // Worker向け
 import { exaMCPSearchTool } from '../tools/exa-search-wrapper';
 import { docsReaderTool } from '../tools/docs-reader-tool';
+import { workflowOrchestratorTool } from '../tools/workflow-orchestrator-tool';
 
 export type ToolId = keyof typeof toolRegistry;
 
 export const toolRegistry = {
   agentNetworkTool,
+  workflowOrchestratorTool,
   slidePreviewTool,
   jobStatusTool,
   jobResultTool,
@@ -43,7 +45,9 @@ export function getToolsForRole(role: AgentRole): Record<string, unknown> {
   switch (role) {
     case 'GENERAL':
       return {
+        // デフォルトでは両方登録しておき、動的に切り替える
         agentNetworkTool,
+        workflowOrchestratorTool,
         slidePreviewTool,
         jobStatusTool,
         jobResultTool,

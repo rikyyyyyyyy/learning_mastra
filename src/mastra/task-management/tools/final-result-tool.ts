@@ -68,12 +68,14 @@ export const finalResultTool = createTool({
       // 最終結果オブジェクトを構築
       const jobResult = {
         jobId: networkId,
-        workflowId: 'agent-network', // 互換性のため
+        workflowId: 'workflow',
         status: 'completed',
         result: {
           success: true,
           taskType: taskType,
           result: finalResult,
+          // 標準化された成果物フィールド（generalやUIでの参照用）
+          artifact: finalResult,
           executionSummary: {
             totalIterations: metadata?.totalIterations || 0,
             agentsInvolved: metadata?.agentsInvolved || ['ceo-agent', 'manager-agent', 'worker-agent'],
@@ -93,10 +95,11 @@ export const finalResultTool = createTool({
       console.log(`✅ 最終成果物を保存しました: ${filePath}`);
       console.log(`📦 保存された内容:`, JSON.stringify(jobResult, null, 2));
       
-      // job-status-toolのステータスも更新するため、動的インポート
+      // DBにも結果を保存し、ステータス更新
       try {
-        const { updateJobStatus } = await import('../../tools/job-status-tool');
-        updateJobStatus(networkId, 'completed', { result: jobResult.result });
+        const { updateJobStatus, storeJobResult } = await import('../../tools/job-status-tool');
+        await storeJobResult(networkId, jobResult.result, 'workflow');
+        await updateJobStatus(networkId, 'completed', { result: jobResult.result });
       } catch (error) {
         console.warn('⚠️ ジョブステータスの更新に失敗（処理は継続）:', error);
       }
