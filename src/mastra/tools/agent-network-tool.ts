@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
 import { NewAgentNetwork } from '@mastra/core/network/vNext';
 import { Agent } from '@mastra/core/agent';
+import { RuntimeContext } from '@mastra/core/di';
 import { resolveModel } from '../config/model-registry';
 import { createRoleAgent } from '../agents/factory';
 import { buildNetwork } from '../networks/builder';
@@ -10,6 +11,7 @@ import { resolveNetworkFromDB } from '../networks/resolver';
 import { sharedMemory } from '../shared-memory';
 import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
 import { createAgentLogger } from '../utils/agent-logger';
+import { extractSystemContext } from '../utils/shared-context';
 
 // ===== Typed stream event definitions and helpers =====
 type AgentRoutingChunk = {
@@ -222,10 +224,16 @@ const executeAgentNetwork = async (
     const { aiModel: networkModel, info: networkModelInfo } = resolveModel(selectedModelType);
     logger.info(`エージェントネットワーク用モデル model=${networkModelInfo.displayName} provider=${networkModelInfo.provider}`);
 
+    // RuntimeContextからシステムコンテキストを抽出
+    const systemContext = runtimeContext ? extractSystemContext(runtimeContext as RuntimeContext) : undefined;
+    if (systemContext) {
+      logger.info(`システムコンテキストを使用 timestamp=${systemContext.timestamp} timezone=${systemContext.timezone}`);
+    }
+
     // 選択モデルで各ロールのエージェントを動的生成（ファクトリ経由）
-    const ceoAgent = createRoleAgent({ role: 'CEO', modelKey: selectedModelType, memory: sharedMemory });
-    const managerAgent = createRoleAgent({ role: 'MANAGER', modelKey: selectedModelType, memory: sharedMemory });
-    const workerAgent = createRoleAgent({ role: 'WORKER', modelKey: selectedModelType, memory: sharedMemory });
+    const ceoAgent = createRoleAgent({ role: 'CEO', modelKey: selectedModelType, memory: sharedMemory, systemContext });
+    const managerAgent = createRoleAgent({ role: 'MANAGER', modelKey: selectedModelType, memory: sharedMemory, systemContext });
+    const workerAgent = createRoleAgent({ role: 'WORKER', modelKey: selectedModelType, memory: sharedMemory, systemContext });
 
     // メモリ設定を準備
     const resourceId = (runtimeContext as { get: (key: string) => unknown })?.get?.('resourceId') as string | undefined;

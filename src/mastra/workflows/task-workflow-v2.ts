@@ -8,6 +8,7 @@ import { directiveManagementTool } from '../task-management/tools/directive-mana
 import { batchTaskCreationTool } from '../task-management/tools/batch-task-creation-tool';
 import { taskManagementTool } from '../task-management/tools/task-management-tool';
 import { finalResultTool } from '../task-management/tools/final-result-tool';
+import { extractSystemContext } from '../utils/shared-context';
 
 // 入出力スキーマはエージェントネットワークツールと同等
 const TaskTypeEnum = z.enum(['web-search', 'slide-generation', 'weather', 'other']);
@@ -74,8 +75,11 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           )
         );
 
+        // RuntimeContextからシステムコンテキストを抽出
+        const systemContext = extractSystemContext(rc);
+        
         // CEOエージェント（選択モデル）
-        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel });
+        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext });
 
         // ポリシーJSONを生成
         const { text } = await ceo.generate([
@@ -197,7 +201,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
         let startingStepNumber = 1;
 
         if (directives.hasPending) {
-          const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel });
+          const systemContext = extractSystemContext(rc);
+          const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext });
           const { text } = await ceo.generate([
             {
               role: 'user',
@@ -250,7 +255,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
         }
 
         // タスク分解（ManagerがJSON計画を出力）
-        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel });
+        const systemContextForManager = extractSystemContext(rc);
+        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext: systemContextForManager });
         const { text: planText } = await manager.generate([
           {
             role: 'user',
@@ -329,8 +335,9 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           if (!thread) rc.set?.('threadId', jobId);
           if (!resource) rc.set?.('resourceId', jobId);
         } catch {}
-        const worker = createRoleAgent({ role: 'WORKER', modelKey: selectedModel });
-        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel });
+        const systemContext = extractSystemContext(rc);
+        const worker = createRoleAgent({ role: 'WORKER', modelKey: selectedModel, systemContext });
+        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext });
 
         let loopCount = 0;
         while (loopCount < 20) {
@@ -433,7 +440,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           if (!thread) rc.set?.('threadId', jobId);
           if (!resource) rc.set?.('resourceId', jobId);
         } catch {}
-        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel });
+        const systemContext = extractSystemContext(rc);
+        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext });
 
         // 全小タスクの結果を収集
         const listRes = await taskManagementTool.execute({ context: { action: 'list_network_tasks', networkId: jobId }, runtimeContext: rc });

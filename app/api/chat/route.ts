@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { RuntimeContext } from "@mastra/core/di";
 import { createGeneralAgent } from "@/src/mastra/agents/general-agent";
+import { injectSystemContext } from "@/src/mastra/utils/shared-context";
 
 export async function POST(req: NextRequest) {
   try {
@@ -49,6 +50,9 @@ export async function POST(req: NextRequest) {
     // 選択モデルをネットワーク側に伝播
     if (model) runtimeContext.set('selectedModel', model);
     if (toolMode) runtimeContext.set('toolMode', toolMode);
+    
+    // システムコンテキストをRuntimeContextに注入
+    injectSystemContext(runtimeContext);
     
     console.log("Chat API: RuntimeContext created with resourceId:", user.id, "threadId:", threadId || `thread-${Date.now()}`);
 

@@ -3,6 +3,7 @@ import { sharedMemory } from '../shared-memory';
 import { getAgentPrompt } from '../prompts/agent-prompts';
 import { resolveModel, AnyModel } from '../config/model-registry';
 import { getToolsForRole } from '../config/tool-registry';
+import { SystemContext } from '../utils/shared-context';
 
 export type RoleId = 'GENERAL' | 'CEO' | 'MANAGER' | 'WORKER';
 
@@ -10,10 +11,11 @@ export interface AgentFactoryOptions {
   role: RoleId;
   modelKey?: string;
   memory?: unknown; // NewAgentNetworkがDynamicArgumentを要求する環境もあるためunknownで受ける
+  systemContext?: SystemContext; // システムコンテキストをオプションで追加
 }
 
 export function createRoleAgent(options: AgentFactoryOptions): Agent {
-  const { role, modelKey, memory } = options;
+  const { role, modelKey, memory, systemContext } = options;
   const { aiModel, info } = resolveModel(modelKey);
 
   const nameMap: Record<RoleId, string> = {
@@ -25,7 +27,7 @@ export function createRoleAgent(options: AgentFactoryOptions): Agent {
 
   const agent = new Agent({
     name: nameMap[role],
-    instructions: getAgentPrompt(role),
+    instructions: getAgentPrompt(role, systemContext),
     model: aiModel as AnyModel,
     tools: getToolsForRole(role) as unknown as never,
     memory: memory ?? sharedMemory,
@@ -45,12 +47,13 @@ export interface AgentDefinitionInput {
   promptText?: string;
   tools?: string[]; // toolRegistry のキー
   memory?: unknown;
+  systemContext?: SystemContext; // システムコンテキストをオプションで追加
 }
 
 export function createAgentFromDefinition(def: AgentDefinitionInput): Agent {
   const { aiModel, info } = resolveModel(def.modelKey);
 
-  const instructions = def.promptText ?? getAgentPrompt(def.role);
+  const instructions = def.promptText ?? getAgentPrompt(def.role, def.systemContext);
 
   // ツール解決（指定があればそのセット、無ければ役割デフォルト）
   const defaultTools = getToolsForRole(def.role);

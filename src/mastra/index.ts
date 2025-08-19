@@ -4,9 +4,9 @@ import { PinoLogger } from '@mastra/loggers';
 import { LibSQLStore } from '@mastra/libsql';
 import { generalAgent } from './agents/general-agent';
 // New network agents
-import { ceoAgent } from './agents/network/ceo-agent';
-import { managerAgent } from './agents/network/manager-agent';
-import { workerAgent } from './agents/network/worker-agent';
+import { ceoAgent, createCeoAgent } from './agents/network/ceo-agent';
+import { managerAgent, createManagerAgent } from './agents/network/manager-agent';
+import { workerAgent, createWorkerAgent } from './agents/network/worker-agent';
 // Task management
 import { initializeTaskManagementDB } from './task-management/db/migrations';
 import { logBus, ConsoleSink, DbSink } from './services/log-bus';
@@ -48,3 +48,4 @@ initializeTaskManagementDB(':memory:').then(() => {
 
 // エージェントをエクスポート
 export { generalAgent, ceoAgent, managerAgent, workerAgent };
+export { createCeoAgent, createManagerAgent, createWorkerAgent };

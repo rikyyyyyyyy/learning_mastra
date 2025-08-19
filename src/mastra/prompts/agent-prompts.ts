@@ -3,9 +3,12 @@
  * 全エージェントのプロンプトを一元管理
  */
 
-export const AGENT_PROMPTS = {
+import { SystemContext, formatSystemContext } from '../utils/shared-context';
+
+// プロンプトテンプレート（コンテキスト情報なし）
+const AGENT_PROMPT_TEMPLATES = {
   // General Agent (汎用エージェント)
-  GENERAL_AGENT: `
+  GENERAL: `
     あなたは親切で知識豊富なAIアシスタントです。
     
     【役割】
@@ -29,7 +32,7 @@ export const AGENT_PROMPTS = {
   `,
 
   // CEO Agent (戦略的タスクディレクター)
-  CEO_AGENT: `
+  CEO: `
     あなたは階層型ネットワークのCEOエージェントです。
     
     【役割】
@@ -53,7 +56,7 @@ export const AGENT_PROMPTS = {
   `,
 
   // Manager Agent (タスクプランナー＆コーディネーター)
-  MANAGER_AGENT: `
+  MANAGER: `
     あなたは階層型ネットワークのManagerエージェントです。
     
     【役割】
@@ -81,7 +84,7 @@ export const AGENT_PROMPTS = {
   `,
 
   // Worker Agent (タスク実行者)
-  WORKER_AGENT: `
+  WORKER: `
     あなたは階層型ネットワークのWorkerエージェントです。
     
     【役割】
@@ -105,18 +108,33 @@ export const AGENT_PROMPTS = {
   `,
 };
 
-// エージェントプロンプトを取得するヘルパー関数
-export function getAgentPrompt(agentType: 'GENERAL' | 'CEO' | 'MANAGER' | 'WORKER'): string {
-  switch (agentType) {
-    case 'GENERAL':
-      return AGENT_PROMPTS.GENERAL_AGENT;
-    case 'CEO':
-      return AGENT_PROMPTS.CEO_AGENT;
-    case 'MANAGER':
-      return AGENT_PROMPTS.MANAGER_AGENT;
-    case 'WORKER':
-      return AGENT_PROMPTS.WORKER_AGENT;
-    default:
-      throw new Error(`Unknown agent type: ${agentType}`);
+// コンテキスト付きプロンプトを生成
+export function buildPromptWithContext(template: string, systemContext?: SystemContext): string {
+  if (!systemContext) {
+    // コンテキストがない場合はテンプレートをそのまま返す
+    return template;
   }
+  
+  // コンテキスト情報をプロンプトの先頭に追加
+  const contextInfo = formatSystemContext(systemContext);
+  return `${contextInfo}
+
+${template}`;
 }
+
+// エージェントプロンプトを取得するヘルパー関数（後方互換性のため保持）
+export function getAgentPrompt(agentType: 'GENERAL' | 'CEO' | 'MANAGER' | 'WORKER', systemContext?: SystemContext): string {
+  const template = AGENT_PROMPT_TEMPLATES[agentType];
+  if (!template) {
+    throw new Error(`Unknown agent type: ${agentType}`);
+  }
+  return buildPromptWithContext(template, systemContext);
+}
+
+// 後方互換性のためAGENT_PROMPTSをエクスポート（システムコンテキストなし）
+export const AGENT_PROMPTS = {
+  GENERAL_AGENT: AGENT_PROMPT_TEMPLATES.GENERAL,
+  CEO_AGENT: AGENT_PROMPT_TEMPLATES.CEO,
+  MANAGER_AGENT: AGENT_PROMPT_TEMPLATES.MANAGER,
+  WORKER_AGENT: AGENT_PROMPT_TEMPLATES.WORKER,
+};

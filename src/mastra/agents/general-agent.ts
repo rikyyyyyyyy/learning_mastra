@@ -3,6 +3,7 @@ import { sharedMemory } from '../shared-memory';
 import { getToolsForRole } from '../config/tool-registry';
 import { getAgentPrompt } from '../prompts/agent-prompts';
 import { resolveModel } from '../config/model-registry';
+import { getSystemContext } from '../utils/shared-context';
 
 // モデルを動的に作成する関数
 // toolMode: 'network' | 'workflow' | 'both'
@@ -29,9 +30,12 @@ export function createGeneralAgent(modelType: string = 'claude-sonnet-4', toolMo
     return Object.fromEntries(entries);
   })();
 
+  // システムコンテキストを取得してプロンプトに注入
+  const systemContext = getSystemContext();
+  
   const agent = new Agent({
     name: 'General AI Assistant',
-    instructions: getAgentPrompt('GENERAL'),
+    instructions: getAgentPrompt('GENERAL', systemContext),
     model: aiModel,
     tools: filteredTools as unknown as never,
     memory: sharedMemory,
