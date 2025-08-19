@@ -149,7 +149,6 @@ const executeAgentNetwork = async (
     taskDescription: string;
     taskParameters: unknown;
     context?: {
-      priority?: 'low' | 'medium' | 'high';
       constraints?: unknown;
       expectedOutput?: string;
       additionalInstructions?: string;
@@ -182,7 +181,7 @@ const executeAgentNetwork = async (
         task_parameters: inputData.taskParameters,
         progress: 0,
         created_by: createdBy,
-        priority: inputData.context?.priority || 'medium',
+        priority: 'medium',
         step_number: undefined, // Explicitly set to undefined to mark as main network task
         metadata: {
           isNetworkMainTask: true, // Mark this as the main network task
@@ -297,7 +296,6 @@ Parameters: ${JSON.stringify(parsedParameters, null, 2)}
 ${inputData.context?.expectedOutput ? `期待出力: ${inputData.context.expectedOutput}` : ''}
 ${inputData.context?.constraints ? `制約: ${JSON.stringify(inputData.context.constraints)}` : ''}
 ${inputData.context?.additionalInstructions ? `追加指示: ${inputData.context.additionalInstructions}` : ''}
-優先度: ${inputData.context?.priority || 'medium'}
 
 重要: Network ID "${jobId}"を使用してタスクを管理すること。
 `;
@@ -859,7 +857,6 @@ export const agentNetworkTool = createTool({
     taskDescription: z.string().min(1),
     taskParameters: z.record(z.unknown()).describe('Task-specific parameters (object expected)'),
     context: z.object({
-      priority: z.enum(['low', 'medium', 'high']).optional(),
       constraints: z.record(z.unknown()).optional().describe('Any limitations or requirements'),
       expectedOutput: z.string().optional(),
       additionalInstructions: z.string().optional(),
@@ -909,7 +906,7 @@ export const agentNetworkTool = createTool({
           taskType,
           taskDescription,
           taskParameters,
-          context: taskContext as { priority?: 'low'|'medium'|'high'; constraints?: unknown; expectedOutput?: string; additionalInstructions?: string } | undefined,
+          context: taskContext as { constraints?: unknown; expectedOutput?: string; additionalInstructions?: string } | undefined,
         }, runtimeContext);
       });
     }, 0);

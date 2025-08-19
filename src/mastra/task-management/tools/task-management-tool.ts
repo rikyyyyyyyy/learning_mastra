@@ -27,7 +27,6 @@ export const taskManagementTool = createTool({
       taskType: z.string().optional(),
       taskDescription: z.string().optional(),
       taskParameters: z.any().optional(),
-      priority: z.enum(['low', 'medium', 'high']).default('medium'),
       metadata: z.record(z.any()).optional(),
     }).optional().describe('Data for creating a new task'),
     status: TaskStatus.optional().describe('New status for update operations'),
@@ -94,8 +93,9 @@ export const taskManagementTool = createTool({
             task_parameters: taskData.taskParameters,
             progress: 0,
             created_by: 'manager-agent',
-            priority: taskData.priority,
             metadata: taskData.metadata,
+            // priority は小タスクでは不要だが DB スキーマと型整合のため付与
+            priority: 'medium',
           });
 
           return {
@@ -263,7 +263,6 @@ export const taskManagementTool = createTool({
               taskType: task.task_type,
               description: task.task_description,
               stepNumber: task.step_number,
-              priority: task.priority,
               createdAt: task.created_at,
             },
             message: `Next task is ${task.task_id}`,
@@ -281,7 +280,6 @@ export const taskManagementTool = createTool({
               taskType: t.task_type,
               description: t.task_description,
               stepNumber: t.step_number,
-              priority: t.priority,
               createdAt: t.created_at,
             })),
             message: `Found ${tasks.length} pending tasks in network ${networkId}`,

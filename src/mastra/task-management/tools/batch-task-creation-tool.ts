@@ -14,7 +14,6 @@ export const batchTaskCreationTool = createTool({
       taskType: z.string(),
       taskDescription: z.string(),
       taskParameters: z.any().optional(),
-      priority: z.enum(['low', 'medium', 'high']).default('medium'),
       stepNumber: z.number().optional(),
       dependsOn: z.array(z.string()).optional(),
       estimatedTime: z.number().optional().describe('Estimated time in seconds'),
@@ -81,8 +80,6 @@ export const batchTaskCreationTool = createTool({
           task_parameters: task.taskParameters,
           progress: 0,
           created_by: 'manager-agent',
-          assigned_to: autoAssign ? getWorkerForTaskType(task.taskType) : undefined,
-          priority: task.priority,
           step_number: task.stepNumber || index + 1,
           depends_on: task.dependsOn,
           metadata: {
@@ -91,6 +88,8 @@ export const batchTaskCreationTool = createTool({
             batchCreated: true,
             batchSize: tasks.length,
           },
+          // 小タスクでは優先度タグは利用しないが、型・DB整合のため固定値を保存
+          priority: 'medium' as const,
         };
       });
       
@@ -115,7 +114,6 @@ export const batchTaskCreationTool = createTool({
             step: t.step_number,
             type: t.task_type,
             description: t.task_description,
-            priority: t.priority,
             dependsOn: t.depends_on,
           })),
           createdAt: new Date().toISOString(),

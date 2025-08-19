@@ -58,10 +58,12 @@ export class NetworkTaskDAO extends BaseDAO {
     super('network_tasks');
   }
 
-  async create(task: Omit<NetworkTask, 'created_at' | 'updated_at'>): Promise<NetworkTask> {
+  async create(task: Omit<NetworkTask, 'created_at' | 'updated_at' | 'priority'> & { priority?: 'low' | 'medium' | 'high' }): Promise<NetworkTask> {
     const now = new Date().toISOString();
     const fullTask: NetworkTask = {
       ...task,
+      // priorityは小タスクでは使わないため、未指定時は'medium'で整合
+      priority: (task as any).priority ?? 'medium',
       created_at: now,
       updated_at: now,
     };
@@ -124,7 +126,7 @@ export class NetworkTaskDAO extends BaseDAO {
   }
 
   async findByNetworkAndStatus(networkId: string, status: TaskStatus): Promise<NetworkTask[]> {
-    const query = 'SELECT * FROM network_tasks WHERE network_id = ? AND status = ? ORDER BY priority DESC, created_at ASC';
+    const query = 'SELECT * FROM network_tasks WHERE network_id = ? AND status = ? ORDER BY created_at ASC';
     const results = await this.execute(query, [networkId, status]) as Record<string, unknown>[];
     
     return results.map((r) => this.parseTask(r));
@@ -145,7 +147,7 @@ export class NetworkTaskDAO extends BaseDAO {
   }
 
   async findByAssignedWorker(workerId: string): Promise<NetworkTask[]> {
-    const query = 'SELECT * FROM network_tasks WHERE assigned_to = ? AND status IN (\'queued\', \'running\') ORDER BY priority DESC, created_at ASC';
+    const query = 'SELECT * FROM network_tasks WHERE assigned_to = ? AND status IN (\'queued\', \'running\') ORDER BY created_at ASC';
     const results = await this.execute(query, [workerId]) as Record<string, unknown>[];
     
     return results.map((r) => this.parseTask(r));
@@ -302,7 +304,8 @@ export class NetworkTaskDAO extends BaseDAO {
       progress: row.progress as number,
       created_by: row.created_by as string,
       assigned_to: row.assigned_to as string | undefined,
-      priority: row.priority as 'low' | 'medium' | 'high',
+      // priority は DB 側でデフォルト 'medium' が設定されているため、null/undefined の場合は 'medium' を採用
+      priority: ((row.priority as 'low' | 'medium' | 'high') ?? 'medium'),
       step_number: row.step_number as number | undefined,
       depends_on: row.depends_on ? JSON.parse(row.depends_on as string) : undefined,
       execution_time: row.execution_time as number | undefined,

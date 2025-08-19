@@ -19,7 +19,6 @@ interface NetworkTask {
   progress: number;
   created_by: string;
   assigned_to?: string;
-  priority: 'low' | 'medium' | 'high';
   created_at: string;
   updated_at: string;
   completed_at?: string;
@@ -51,11 +50,7 @@ const statusColors = {
   paused: "bg-yellow-500"
 };
 
-const priorityColors = {
-  low: "bg-muted text-muted-foreground",
-  medium: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
-  high: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
-};
+// 優先度表示は小タスクでは使用しない
 
 export function TaskViewer({ networkId }: { networkId?: string }) {
   const [tasks, setTasks] = useState<NetworkTask[]>([]);
@@ -253,15 +248,9 @@ export function TaskViewer({ networkId }: { networkId?: string }) {
                     
                     <span className="font-medium">{task.task_type}</span>
                     
-                    <Badge variant="outline" className={priorityColors[task.priority]}>
-                      {task.priority}
-                    </Badge>
+                    {/* 小タスクでは優先度は表示しない */}
                     
-                    {task.assigned_to && (
-                      <Badge variant="secondary">
-                        担当: {task.assigned_to}
-                      </Badge>
-                    )}
+                    {/* 小タスクでは担当者の表示は不要 */}
                   </div>
                   
                   <div className="ml-10">
@@ -328,7 +317,7 @@ export function TaskViewer({ networkId }: { networkId?: string }) {
                       <div>
                         <span className="font-medium text-sm">結果:</span>
                         <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto max-h-48 overflow-y-auto">
-                          {JSON.stringify(task.task_result, null, 2)}
+                          {typeof task.task_result === 'string' ? task.task_result : JSON.stringify(task.task_result, null, 2)}
                         </pre>
                       </div>
                     )}

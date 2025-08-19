@@ -256,7 +256,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
             role: 'user',
             content:
               `次のタスクを5-6個程度の小タスクに分解し、JSON配列で出力してください。` +
-              `各要素は {"taskType": string, "taskDescription": string, "taskParameters"?: object, "priority"?: "low"|"medium"|"high", "stepNumber"?: number}。` +
+              `各要素は {"taskType": string, "taskDescription": string, "taskParameters"?: object, "stepNumber"?: number}。` +
               `出力はJSON配列のみ（バッククオート不要）。` +
               `元タスク: ${inputData.taskType} - ${inputData.taskDescription}`,
           },
@@ -266,7 +266,6 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           taskType: string;
           taskDescription: string;
           taskParameters?: Record<string, unknown>;
-          priority?: 'low' | 'medium' | 'high';
           stepNumber?: number;
         }> = [];
         try {
@@ -281,12 +280,11 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           ];
         }
 
-        // priority/stepNumberを正規化（再計画時は最後の完了ステップ+1から通しで振り直し）
+        // stepNumberを正規化（再計画時は最後の完了ステップ+1から通しで振り直し）
         const normalizedTasks = tasks.map((t, i) => ({
           taskType: t.taskType,
           taskDescription: t.taskDescription,
           taskParameters: t.taskParameters,
-          priority: (t.priority ?? 'medium') as 'low' | 'medium' | 'high',
           stepNumber: replanTriggered ? (startingStepNumber + i) : (t.stepNumber ?? i + 1),
         }));
 

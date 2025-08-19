@@ -51,8 +51,6 @@ export const taskViewerTool = createTool({
               parameters: t.task_parameters,
               result: t.task_result,
               progress: t.progress,
-              priority: t.priority,
-              assignedTo: t.assigned_to,
               createdAt: t.created_at,
               completedAt: t.completed_at,
               executionTime: t.execution_time,

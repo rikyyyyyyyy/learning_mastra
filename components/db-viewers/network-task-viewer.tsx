@@ -37,7 +37,6 @@ interface NetworkTask {
   progress: number;
   created_by: string;
   assigned_to?: string;
-  priority: 'low' | 'medium' | 'high';
   step_number?: number;
   depends_on?: string[];
   execution_time?: number;
@@ -79,11 +78,7 @@ const statusColors = {
   paused: "text-yellow-500"
 };
 
-const priorityColors = {
-  low: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300",
-  medium: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
-  high: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
-};
+// 優先度表示は小タスクでは使用しない
 
 export function NetworkTaskViewer() {
   const [networkGroups, setNetworkGroups] = useState<NetworkGroup[]>([]);
@@ -514,14 +509,7 @@ export function NetworkTaskViewer() {
                                         {task.task_type}
                                       </span>
                                     </span>
-                                    <Badge className={`text-xs ${priorityColors[task.priority]}`}>
-                                      {task.priority}
-                                    </Badge>
-                                    {task.assigned_to && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        {task.assigned_to}
-                                      </Badge>
-                                    )}
+                                    {/* 小タスクでは優先度と担当者の表示は不要 */}
                                   </div>
                                 
                                 <p className="text-sm text-muted-foreground mb-1">
@@ -604,7 +592,7 @@ export function NetworkTaskViewer() {
                                   <div className="mt-2 text-xs text-muted-foreground">
                                     <div>タスクID: {task.task_id}</div>
                                     <div>作成者: {task.created_by}</div>
-                                    {task.assigned_to && <div>担当: {task.assigned_to}</div>}
+                                    {/* 担当者の表示は不要 */}
                                     {task.execution_time && <div>実行時間: {Math.round(task.execution_time / 1000)}秒</div>}
                                   </div>
                                 </div>

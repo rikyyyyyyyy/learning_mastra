@@ -17,7 +17,6 @@ export const taskRegistryTool = createTool({
       taskDescription: z.string().optional(),
       taskParameters: z.any().optional(),
       createdBy: z.string().optional(),
-      priority: z.enum(['low', 'medium', 'high']).default('medium'),
       metadata: z.record(z.any()).optional(),
     }).optional().describe('Data for registering a new task'),
     status: TaskStatus.optional().describe('New status for update operations'),
@@ -67,8 +66,9 @@ export const taskRegistryTool = createTool({
             task_parameters: taskData.taskParameters,
             progress: 0,
             created_by: taskData.createdBy,
-            priority: taskData.priority,
             metadata: taskData.metadata,
+            // priorityは小タスクには不要だがDBの型整合のため固定値
+            priority: 'medium',
           });
 
           return {
@@ -146,7 +146,6 @@ export const taskRegistryTool = createTool({
               taskId: t.task_id,
               status: t.status,
               taskType: t.task_type,
-              priority: t.priority,
               createdBy: t.created_by,
               createdAt: t.created_at,
             })),

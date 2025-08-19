@@ -12,7 +12,6 @@ export const workflowOrchestratorTool = createTool({
     taskParameters: z.record(z.unknown()).describe('Task-specific parameters (object expected)'),
     context: z
       .object({
-        priority: z.enum(['low', 'medium', 'high']).optional(),
         constraints: z.record(z.unknown()).optional(),
         expectedOutput: z.string().optional(),
         additionalInstructions: z.string().optional(),
@@ -31,7 +30,7 @@ export const workflowOrchestratorTool = createTool({
       taskType: 'web-search' | 'slide-generation' | 'weather' | 'other';
       taskDescription: string;
       taskParameters: Record<string, unknown>;
-      context?: { priority?: 'low' | 'medium' | 'high'; constraints?: unknown; expectedOutput?: string; additionalInstructions?: string };
+      context?: { constraints?: unknown; expectedOutput?: string; additionalInstructions?: string };
     };
 
     const jobId = `workflow-${taskType}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
@@ -62,7 +61,7 @@ export const workflowOrchestratorTool = createTool({
             task_parameters: taskParameters,
             progress: 0,
             created_by: createdBy,
-            priority: taskContext?.priority || 'medium',
+            priority: 'medium',
             step_number: undefined,
             metadata: {
               isNetworkMainTask: true,
