@@ -2,6 +2,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
+import { artifactDAO, contentStoreDAO } from '../db/cas-dao';
 
 // ジョブ結果を保存するディレクトリ
 const JOB_RESULTS_DIR = path.join(process.cwd(), '.job-results');
@@ -61,11 +62,56 @@ export const finalResultTool = createTool({
     message: z.string(),
     savedPath: z.string().optional(),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ context, runtimeContext }) => {
     const { networkId, taskType, finalResult, metadata } = context;
     
     try {
-      // 最終結果オブジェクトを構築
+      // 1. アーティファクトとして最終成果物を保存
+      let artifactRef = null;
+      let mimeType = 'text/plain';
+      let contentToStore = '';
+      
+      // タスクタイプに応じたMIMEタイプとコンテンツを設定
+      if (taskType === 'slide-generation' && finalResult.htmlCode) {
+        mimeType = 'text/html';
+        contentToStore = finalResult.htmlCode;
+      } else if (typeof finalResult === 'string') {
+        contentToStore = finalResult;
+      } else {
+        mimeType = 'application/json';
+        contentToStore = JSON.stringify(finalResult, null, 2);
+      }
+      
+      // アーティファクトを作成
+      const artifact = await artifactDAO.create(
+        networkId,
+        mimeType,
+        undefined, // taskIdは最終成果物なのでundefined
+        { type: 'final_result', taskType }
+      );
+      
+      // コンテンツを保存
+      const contentHash = await contentStoreDAO.store(contentToStore, mimeType);
+      
+      // リビジョンをコミット
+      const revision = await artifactDAO.commit(
+        artifact.artifact_id,
+        contentHash,
+        `Final result for ${taskType} task`,
+        'ceo-agent',
+        []
+      );
+      
+      artifactRef = {
+        artifactId: artifact.artifact_id,
+        revisionId: revision.revision_id,
+        reference: `ref:${contentHash.substring(0, 12)}`,
+        contentHash: contentHash,
+      };
+      
+      console.log(`🎨 最終成果物をアーティファクトとして保存: ${artifactRef.reference}`);
+      
+      // 2. 従来形式のジョブ結果も作成（後方互換性のため）
       const jobResult = {
         jobId: networkId,
         workflowId: 'workflow',
@@ -74,8 +120,9 @@ export const finalResultTool = createTool({
           success: true,
           taskType: taskType,
           result: finalResult,
-          // 標準化された成果物フィールド（generalやUIでの参照用）
-          artifact: finalResult,
+          // アーティファクト参照を追加
+          artifactRef: artifactRef,
+          artifact: artifactRef ? artifactRef.reference : finalResult,
           executionSummary: {
             totalIterations: metadata?.totalIterations || 0,
             agentsInvolved: metadata?.agentsInvolved || ['ceo-agent', 'manager-agent', 'worker-agent'],
@@ -89,11 +136,11 @@ export const finalResultTool = createTool({
       // ファイルパスを生成
       const filePath = path.join(JOB_RESULTS_DIR, `${networkId}.json`);
       
-      // JSONファイルとして保存
+      // JSONファイルとして保存（後方互換性のため維持）
       fs.writeFileSync(filePath, JSON.stringify(jobResult, null, 2));
       
       console.log(`✅ 最終成果物を保存しました: ${filePath}`);
-      console.log(`📦 保存された内容:`, JSON.stringify(jobResult, null, 2));
+      console.log(`📦 アーティファクト参照: ${artifactRef.reference}`);
       
       // DBにも結果を保存し、ステータス更新
       try {

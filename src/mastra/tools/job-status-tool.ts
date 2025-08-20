@@ -96,17 +96,50 @@ export async function storeJobResult(
   await jobStore.storeResult(jobId, result, workflowId);
 }
 
-// ワークフロー結果を取得する関数（ファイルシステムから読み込み）
+// ワークフロー結果を取得する関数（DBまたはファイルシステムから読み込み）
 export async function getJobResult(jobId: string): Promise<JobResult | null> {
   console.log(`🔍 ジョブ結果を検索(DB): ${jobId}`);
+  
+  // まずDBから取得を試みる
   const row = await jobStore.getResult(jobId);
-  if (!row) return null;
-  return {
-    jobId: row.job_id,
-    result: row.result,
-    completedAt: new Date(row.created_at),
-    workflowId: row.workflow_id ?? 'unknown',
-  };
+  if (row) {
+    return {
+      jobId: row.job_id,
+      result: row.result,
+      completedAt: new Date(row.created_at),
+      workflowId: row.workflow_id ?? 'unknown',
+    };
+  }
+  
+  // DBに無い場合はファイルシステムから読み込み
+  console.log(`📂 DBに結果が無いため、ファイルシステムから検索: ${jobId}`);
+  try {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    
+    const jobResultsDir = path.join(process.cwd(), '.job-results');
+    const filePath = path.join(jobResultsDir, `${jobId}.json`);
+    
+    // ファイルの存在確認
+    await fs.access(filePath);
+    
+    // ファイルを読み込み
+    const content = await fs.readFile(filePath, 'utf-8');
+    const fileData = JSON.parse(content);
+    
+    console.log(`✅ ファイルシステムから結果を取得: ${jobId}`);
+    
+    // ファイルデータからJobResult形式に変換
+    return {
+      jobId: fileData.jobId || jobId,
+      result: fileData.result,
+      completedAt: fileData.completedAt ? new Date(fileData.completedAt) : new Date(),
+      workflowId: fileData.workflowId || 'unknown',
+    };
+  } catch (error) {
+    console.log(`❌ ファイルシステムからも結果が見つかりません: ${jobId}`);
+    return null;
+  }
 }
 
 // 完了したジョブの一覧を取得する関数

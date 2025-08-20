@@ -4,7 +4,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:artifact": "npx tsx src/mastra/task-management/test-artifact-system.ts"
   },
   "pnpm": {
     "overrides": {
@@ -38,7 +39,10 @@
     "ai": "^5.0.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "diff": "^7.0.0",
+    "diff-match-patch": "^1.0.5",
     "dotenv": "^17.2.0",
+    "fast-json-patch": "^3.1.1",
     "libsql": "0.5.14-pre.1",
     "lucide-react": "^0.511.0",
     "next": "latest",

@@ -39,6 +39,11 @@ export class TaskManagementDB {
       { name: 'agent_logs', sql: SQL_SCHEMAS.agent_logs },
       { name: 'agent_definitions', sql: SQL_SCHEMAS.agent_definitions },
       { name: 'network_definitions', sql: SQL_SCHEMAS.network_definitions },
+      // Content-Addressable Storage tables
+      { name: 'content_store', sql: SQL_SCHEMAS.content_store },
+      { name: 'content_chunks', sql: SQL_SCHEMAS.content_chunks },
+      { name: 'artifacts', sql: SQL_SCHEMAS.artifacts },
+      { name: 'artifact_revisions', sql: SQL_SCHEMAS.artifact_revisions },
     ];
 
     for (const migration of migrations) {

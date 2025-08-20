@@ -9,6 +9,8 @@ import { batchTaskCreationTool } from '../task-management/tools/batch-task-creat
 import { taskManagementTool } from '../task-management/tools/task-management-tool';
 import { finalResultTool } from '../task-management/tools/final-result-tool';
 import { extractSystemContext } from '../utils/shared-context';
+import { artifactIOTool } from '../task-management/tools/artifact-io-tool';
+import { contentStoreTool } from '../task-management/tools/content-store-tool';
 
 // 入出力スキーマはエージェントネットワークツールと同等
 const TaskTypeEnum = z.enum(['web-search', 'slide-generation', 'weather', 'other']);
@@ -340,14 +342,26 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
         const worker = createRoleAgent({ role: 'WORKER', modelKey: selectedModel, systemContext: systemContext || undefined });
         const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext: systemContext || undefined });
 
+        // タスクの総数を取得して進捗管理
+        const allTasksResult = await taskManagementTool.execute({ context: { action: 'list_network_tasks', networkId: jobId }, runtimeContext: rc });
+        const allTasks = (allTasksResult.tasks as Array<{ taskId: string; status: string }> | undefined) || [];
+        const totalTasks = allTasks.length;
+        console.log(`📋 Total tasks to execute: ${totalTasks}`);
+        
         let loopCount = 0;
+        let completedCount = 0;
         while (loopCount < 20) {
           loopCount++;
           // 次に実行すべきタスクをステップ番号昇順で取得（1から順に）
           const next = await taskManagementTool.execute({ context: { action: 'get_next_task', networkId: jobId }, runtimeContext: rc });
           const current = (next.task as { taskId: string; taskType: string; description: string; stepNumber?: number } | null);
-          if (!current) break;
+          if (!current) {
+            console.log(`✅ All tasks completed. Total executed: ${completedCount}/${totalTasks}`);
+            break;
+          }
           const taskId = current.taskId;
+          
+          console.log(`🔄 Starting task ${current.stepNumber || loopCount}: ${current.taskType} - ${current.description}`);
 
           // 実行開始をDBに反映
           await taskManagementTool.execute({ context: { action: 'update_status', networkId: jobId, taskId, status: 'running' }, runtimeContext: rc });
@@ -445,17 +459,78 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
               continue;
             }
 
-            // 受理: 小タスクの完全な最終版を生成させて保存し、完了に更新
-            const { text: finalWork } = await worker.generate([
-              { role: 'user', content: `これまでの内容を踏まえ、この小タスクの完全な最終版のみを1つの出力として返してください。重複・冗長は避け、要件を満たす完全版を提示してください。` },
-            ], { memory: { thread: taskThreadId, resource: taskThreadId }, runtimeContext: rc });
-            await taskManagementTool.execute({ context: { action: 'update_result', networkId: jobId, taskId, result: { text: finalWork, accepted: true } }, runtimeContext: rc });
+            // 受理: 現在の出力を保存（内部的にCAS使用、DBには実コンテンツを保存）
+            // 1. 内部的にアーティファクトを作成（トークン削減のため）
+            const createResult = await artifactIOTool.execute({
+              context: {
+                action: 'create',
+                jobId: jobId,
+                taskId: taskId,
+                mimeType: current.taskType === 'slide-generation' ? 'text/html' : 'text/plain',
+                labels: { taskType: current.taskType, description: current.description },
+              },
+              runtimeContext: rc,
+            });
+            
+            if (createResult.success && createResult.artifactId) {
+              // 2. コンテンツを追加
+              await artifactIOTool.execute({
+                context: {
+                  action: 'append',
+                  artifactId: createResult.artifactId,
+                  content: workText,
+                },
+                runtimeContext: rc,
+              });
+              
+              // 3. リビジョンをコミット
+              await artifactIOTool.execute({
+                context: {
+                  action: 'commit',
+                  artifactId: createResult.artifactId,
+                  message: `Task completed: ${current.description}`,
+                  author: 'worker-agent',
+                },
+                runtimeContext: rc,
+              });
+              
+              // 4. タスクDBには実際のコンテンツを保存（ユーザー要求に従う）
+              await taskManagementTool.execute({ 
+                context: { 
+                  action: 'update_result', 
+                  networkId: jobId, 
+                  taskId, 
+                  result: workText  // 実際のコンテンツをそのまま保存
+                }, 
+                runtimeContext: rc 
+              });
+              
+              agentLogStore.addLogEntry(
+                jobId,
+                formatAgentMessage('manager', 'Manager Agent', `結果を受理し保存しました（アーティファクト: ${createResult.reference}）。`, loopCount, 'response')
+              );
+            } else {
+              // フォールバック: 従来の方法で保存
+              await taskManagementTool.execute({ 
+                context: { 
+                  action: 'update_result', 
+                  networkId: jobId, 
+                  taskId, 
+                  result: workText  // 実際のコンテンツをそのまま保存
+                }, 
+                runtimeContext: rc 
+              });
+              
+              agentLogStore.addLogEntry(
+                jobId,
+                formatAgentMessage('manager', 'Manager Agent', `結果を受理し保存しました。`, loopCount, 'response')
+              );
+            }
+            
             await taskManagementTool.execute({ context: { action: 'update_status', networkId: jobId, taskId, status: 'completed' }, runtimeContext: rc });
-            agentLogStore.addLogEntry(
-              jobId,
-              formatAgentMessage('manager', 'Manager Agent', `結果を受理し保存しました。`, loopCount, 'response')
-            );
             accepted = true;
+            completedCount++;
+            console.log(`✅ Task completed (${completedCount}/${totalTasks}): ${current.taskType}`);
           }
 
           if (!accepted) {
@@ -465,6 +540,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
               jobId,
               formatAgentMessage('manager', 'Manager Agent', `複数回の差し戻し後も受理できず、タスクを失敗としてマークしました。`, loopCount, 'response')
             );
+            console.log(`❌ Task failed: ${current.taskType}`);
           }
         }
 
@@ -497,16 +573,19 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
         const systemContext = extractSystemContext(rc);
         const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined });
 
-        // 全小タスクの結果を収集
+        // 全小タスクの結果を収集（DBから直接実コンテンツを取得）
         const listRes = await taskManagementTool.execute({ context: { action: 'list_network_tasks', networkId: jobId }, runtimeContext: rc });
         const tasks = (listRes.tasks as Array<{ taskId: string; description: string; status: string; stepNumber?: number }> | undefined) || [];
         const detailed: Array<{ step?: number; id: string; description: string; status: string; result?: unknown }> = [];
+        
         for (const t of tasks) {
           const tr = await taskManagementTool.execute({ context: { action: 'get_task', networkId: jobId, taskId: t.taskId }, runtimeContext: rc });
-          // tr.task.task_result にworkerが保存した結果が入る
+          // tr.task.task_result にworkerが保存した結果が入る（実コンテンツ）
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const taskRow = tr.task as any;
-          detailed.push({ step: t.stepNumber, id: t.taskId, description: t.description, status: t.status, result: taskRow?.task_result });
+          const taskResult = taskRow?.task_result;
+          
+          detailed.push({ step: t.stepNumber, id: t.taskId, description: t.description, status: t.status, result: taskResult });
         }
 
         const { text: finalText } = await ceo.generate([
@@ -514,7 +593,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
             role: 'user',
             content:
               `以下の小タスク結果を統合し、タスク種別(${inputData.taskType})にふさわしい最終成果物のみを生成してください。` +
-              `禁止事項: 手順の列挙、メタ説明、品質方針、内部工程の記述。` +
+              `\n【重要】ツールは使用せず、テキストのみを返してください。` +
+              `\n禁止事項: 手順の列挙、メタ説明、品質方針、内部工程の記述、ツールの使用。` +
               `出力要件:` +
               (inputData.taskType === 'slide-generation'
                 ? ` HTML文字列（完全な単一HTMLドキュメント）` 

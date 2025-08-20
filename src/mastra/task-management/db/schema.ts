@@ -51,6 +51,56 @@ export const NetworkDirectiveSchema = z.object({
 
 export type NetworkDirective = z.infer<typeof NetworkDirectiveSchema>;
 
+// Content-Addressable Storage schemas
+export const ContentStoreSchema = z.object({
+  content_hash: z.string(), // SHA-256ハッシュ（主キー）
+  content_type: z.string(), // 'text/html', 'application/json', 'text/markdown'
+  content: z.string(), // Base64エンコードされたコンテンツ
+  size: z.number(),
+  created_at: z.string(),
+  storage_location: z.string().optional(), // S3 URL等（将来用）
+});
+
+export type ContentStore = z.infer<typeof ContentStoreSchema>;
+
+export const ContentChunkSchema = z.object({
+  chunk_id: z.string(),
+  content_hash: z.string(), // 所属するコンテンツ
+  chunk_index: z.number(), // 順序
+  chunk_data: z.string(), // Base64エンコードされた部分データ
+  offset: z.number(), // バイトオフセット
+  size: z.number(),
+  created_at: z.string(),
+});
+
+export type ContentChunk = z.infer<typeof ContentChunkSchema>;
+
+export const ArtifactSchema = z.object({
+  artifact_id: z.string(), // UUID
+  job_id: z.string(),
+  task_id: z.string().optional(),
+  current_revision: z.string(), // 最新リビジョンID
+  mime_type: z.string(),
+  labels: z.record(z.string()).optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export type Artifact = z.infer<typeof ArtifactSchema>;
+
+export const ArtifactRevisionSchema = z.object({
+  revision_id: z.string(), // UUID
+  artifact_id: z.string(),
+  content_hash: z.string(), // CASへの参照
+  parent_revisions: z.array(z.string()).optional(), // 親リビジョン（マージ対応）
+  commit_message: z.string(),
+  author: z.string(), // agent-id
+  created_at: z.string(),
+  patch_from_parent: z.string().optional(), // 差分データ（最適化）
+});
+
+export type ArtifactRevision = z.infer<typeof ArtifactRevisionSchema>;
+
 // SQL table creation statements
 export const SQL_SCHEMAS = {
   network_tasks: `
@@ -162,5 +212,66 @@ export const SQL_SCHEMAS = {
       enabled INTEGER DEFAULT 1,
       updated_at TEXT NOT NULL
     );
+  `,
+  
+  // Content-Addressable Storage tables
+  content_store: `
+    CREATE TABLE IF NOT EXISTS content_store (
+      content_hash TEXT PRIMARY KEY,
+      content_type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      storage_location TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_store_type ON content_store(content_type);
+    CREATE INDEX IF NOT EXISTS idx_content_store_created ON content_store(created_at);
+  `,
+  
+  content_chunks: `
+    CREATE TABLE IF NOT EXISTS content_chunks (
+      chunk_id TEXT PRIMARY KEY,
+      content_hash TEXT NOT NULL REFERENCES content_store(content_hash),
+      chunk_index INTEGER NOT NULL,
+      chunk_data TEXT NOT NULL,
+      offset INTEGER NOT NULL,
+      size INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(content_hash, chunk_index)
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_chunks_hash ON content_chunks(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_content_chunks_order ON content_chunks(content_hash, chunk_index);
+  `,
+  
+  artifacts: `
+    CREATE TABLE IF NOT EXISTS artifacts (
+      artifact_id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      task_id TEXT,
+      current_revision TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      labels TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_artifacts_job ON artifacts(job_id);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_created ON artifacts(created_at);
+  `,
+  
+  artifact_revisions: `
+    CREATE TABLE IF NOT EXISTS artifact_revisions (
+      revision_id TEXT PRIMARY KEY,
+      artifact_id TEXT NOT NULL REFERENCES artifacts(artifact_id),
+      content_hash TEXT NOT NULL REFERENCES content_store(content_hash),
+      parent_revisions TEXT,
+      commit_message TEXT NOT NULL,
+      author TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      patch_from_parent TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_artifact_revisions_artifact ON artifact_revisions(artifact_id);
+    CREATE INDEX IF NOT EXISTS idx_artifact_revisions_hash ON artifact_revisions(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_artifact_revisions_created ON artifact_revisions(created_at);
   `
 };

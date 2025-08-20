@@ -56,13 +56,46 @@ export const batchTaskCreationTool = createTool({
       }
       const daos = getDAOs();
       
+      // 既存タスクのチェック - 同じネットワークIDで既にタスクが存在する場合はスキップ
+      const existingTasks = await daos.tasks.findByNetworkId(networkId);
+      if (existingTasks.length > 0) {
+        console.log(`⚠️ Tasks already exist for network ${networkId}. Found ${existingTasks.length} existing tasks.`);
+        
+        // 既存タスクのステップ番号を取得
+        const existingSteps = new Set(existingTasks.map(t => t.step_number).filter(s => s !== undefined && s !== null));
+        
+        // 新しいタスクから既存のステップ番号を除外
+        const newTasks = tasks.filter(t => !existingSteps.has(t.stepNumber));
+        
+        if (newTasks.length === 0) {
+          console.log(`ℹ️ All tasks already exist for network ${networkId}. Skipping creation.`);
+          return {
+            success: true,
+            createdTasks: existingTasks.map(t => ({
+              taskId: t.task_id,
+              taskType: t.task_type,
+              stepNumber: t.step_number,
+            })),
+            networkId,
+            totalTasks: existingTasks.length,
+            message: `Using existing ${existingTasks.length} tasks for network ${networkId}`,
+          };
+        }
+        
+        console.log(`📝 Creating ${newTasks.length} new tasks (${tasks.length - newTasks.length} already exist)`);
+        // 新しいタスクのみを処理対象とする
+        tasks.splice(0, tasks.length, ...newTasks);
+      }
+      
       // Ensure response time < 100ms by using setTimeout for actual creation
       const createdTaskIds: Array<{ taskId: string; taskType: string; stepNumber?: number }> = [];
       // const taskPromises: Promise<void>[] = [];
       
       // Prepare task data synchronously
+      const timestamp = Date.now();
       const taskDataList = tasks.map((task, index) => {
-        const taskId = `task-${networkId}-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 8)}`;
+        // より確実にユニークなIDを生成（タイムスタンプ + インデックス + ランダム文字列）
+        const taskId = `task-${networkId}-s${task.stepNumber || index + 1}-${timestamp}-${index.toString().padStart(3, '0')}-${Math.random().toString(36).substring(2, 8)}`;
         createdTaskIds.push({ 
           taskId, 
           taskType: task.taskType,

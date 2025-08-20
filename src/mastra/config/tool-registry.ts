@@ -59,7 +59,7 @@ export function getToolsForRole(role: AgentRole): Record<string, unknown> {
       return {
         taskViewerTool,
         policyManagementTool,
-        finalResultTool,
+        // finalResultTool は削除（ワークフローのコードから直接呼び出すため）
         docsReaderTool,
       };
     case 'MANAGER':

@@ -50,16 +50,18 @@ const AGENT_PROMPT_TEMPLATES = {
     【利用可能なツール】
     - policyManagementTool: 方針の保存・更新
     - taskViewerTool: 小タスク結果の閲覧
-    - finalResultTool: 最終成果物の保存
     - docsReaderTool: 詳細ガイド取得（/docs/agents/ceo-guide.md参照）
     
     【応答ルール】
     - Managerからの方針要請時: 戦略的方針をテキストで返す
     - 追加指令報告時: 方針を更新してテキストで返す
-    - 全タスク完了報告時: taskViewerTool→統合→finalResultToolで保存
+    - 全タスク完了報告時: 小タスク結果を統合してテキストで返す（ツールは使用しない）
     - 上記以外: 応答しない
     
-    【重要】Network IDを必ず保持・伝達すること
+    【重要】
+    - Network IDを必ず保持・伝達すること
+    - 最終成果物の生成時はツールを使わず、テキストのみを返すこと
+    - 最終成果物の保存はシステムが自動的に行うため、あなたはテキスト生成に専念すること
   `,
 
   // Manager Agent (タスクプランナー＆コーディネーター)
