@@ -12,130 +12,152 @@ npm run start      # Start production server
 npm run lint       # Run ESLint
 ```
 
-### Package Management
-This project supports both npm and pnpm. All dependencies are managed through `package.json`.
+### Testing Task Management System
+```bash
+npx tsx src/mastra/task-management/test-task-management.ts  # Test distributed task management
+```
 
 ## Architecture Overview
 
-This is a **Mastra-based AI Assistant** built with Next.js that provides web search, weather information, and slide generation capabilities through an asynchronous job system.
+This is a **Mastra-based AI Assistant Platform** built with Next.js 15 featuring a distributed task management system with hierarchical agent networks (CEO-Manager-Worker pattern). The platform enables parallel execution of multiple AI-powered tasks with real-time monitoring, inter-task communication, and artifact sharing.
 
 ### Core Architecture Patterns
 
-1. **Agent-Tool-Workflow Pattern**
-   - **Agents** (`/src/mastra/agents/`): AI-powered assistants that handle user interactions
-   - **Tools** (`/src/mastra/tools/`): Return job IDs immediately (< 100ms) for async operations
-   - **Workflows** (`/src/mastra/workflows/`): Background processes that execute the actual work
+1. **Distributed Task Management System (v4.0)**
+   - **Task Registry**: Register and track multiple parallel tasks
+   - **Artifact Store**: Share results between tasks
+   - **Task Communication**: Send messages to running tasks
+   - **Task Discovery**: Find related tasks and manage dependencies
+   - Database backed by LibSQL with 4 main tables: `network_tasks`, `task_artifacts`, `task_communications`, `task_dependencies`
 
-2. **Job-Based Async System**
-   - All long-running operations return job IDs immediately
-   - Jobs transition through states: queued → running → completed/failed
-   - Results are fetched via job ID when ready
-   - Job results stored in `.job-results` directory
+2. **Hierarchical Agent Network**
+   - **General Agent**: Entry point with access to task management tools
+   - **CEO Agent**: Strategic planning, can discover and communicate with other tasks
+   - **Manager Agent**: Task breakdown, registers subtasks, manages artifacts
+   - **Worker Agent**: Execution with specialized tools
+   - Direct implementation via `agent-network-tool.ts` (no workflow layer)
+   - Maximum 10 iterations with automatic routing
 
-3. **Memory Management**
-   - Thread-based conversation memory using LibSQL (in-memory by default)
-   - User isolation for security
-   - Shared memory between agents within a thread
+3. **Job-Based Async System**
+   - Tools must return within 100ms (use `setTimeout(() => {...}, 0)` for background work)
+   - Job IDs used as task IDs in the task management system
+   - Results stored in `.job-results/{jobId}.json`
+   - Real-time monitoring via SSE at `/api/agent-logs/stream/[jobId]`
 
-4. **Authentication System**
-   - Supabase authentication with middleware session management
-   - Protected routes under `/protected/*`
-   - Complete auth flow (login, signup, forgot password, email confirmation)
+4. **Memory & Authentication**
+   - Thread-based memory using LibSQL (in-memory by default)
+   - Supabase authentication with protected routes under `/protected/*`
 
-### Key Components
+### Key Files
 
-**Main Entry Points:**
-- `/app/api/chat/route.ts`: Primary chat endpoint using general-agent
-- `/app/api/job-result/[jobId]/route.ts`: Job result retrieval endpoint
+**Configuration & Entry Points:**
+- `/src/mastra/index.ts`: Central Mastra configuration (agents, tools, memory)
+- `/src/mastra/prompts/agent-prompts.ts`: All agent prompts in Japanese (centralized)
+- `/app/api/chat/route.ts`: Main chat endpoint
+- `/app/protected/chat/page.tsx`: Chat UI with model selector
 
-**Mastra Configuration:**
-- `/src/mastra/index.ts`: Central Mastra instance configuration
-- Integrates OpenAI (GPT-4o Search Preview), Anthropic (Claude Sonnet 4), and Google AI models
-- MCP (Model Context Protocol) support for Brave search
-- Configures agents, tools, workflows, and memory
+**Task Management System:**
+- `/src/mastra/task-management/db/`: Database schema, migrations, DAO
+- `/src/mastra/task-management/tools/`:
+  - `task-registry-tool.ts`: Register/list/update tasks
+  - `artifact-store-tool.ts`: Store/retrieve/list artifacts
+  - `task-communication-tool.ts`: Send/receive messages between tasks
+  - `task-discovery-tool.ts`: Find related tasks, manage dependencies
 
-**Agent Implementation Pattern:**
-All agents follow this structure:
-- Use specific AI models (e.g., Claude Sonnet 4 for general-agent)
-- Have access to specific tools
-- Share thread memory
-- Return streaming responses
-- Japanese language instructions by default
+**Agent Network:**
+- `/src/mastra/tools/agent-network-tool.ts`: Direct NewAgentNetwork implementation
+- `/src/mastra/agents/network/`: CEO, Manager, Worker agents
+- `/src/mastra/utils/agent-log-store.ts`: In-memory log store with EventEmitter
 
-**Tool Implementation Pattern:**
-Tools must:
-- Return results within 100ms
-- Queue jobs for long-running operations
-- Return job IDs for status tracking
-- Handle errors gracefully
-- Use `setTimeout(() => {...}, 0)` for background execution
+**Tool Implementation Requirements:**
+- Must return within 100ms (use `setTimeout(() => {...}, 0)` for async work)
+- Return job IDs for long operations
 - Handle circular dependencies with dynamic imports
+- Use try-catch for error handling
 
-**Workflow Implementation Pattern:**
-- Use `createWorkflow` and `createStep` from Mastra
-- Chain steps with `.then()`
-- Define input/output schemas using Zod
-- Implement error handling at each step
-- Track progress via workflow events
+### Environment Variables
 
-### Environment Setup
-
-Required environment variables (see `.env.local.example`):
-```
-# AI Provider Keys
+Required in `.env.local`:
+```env
+# AI Provider Keys (required)
 OPENAI_API_KEY=your_key
 ANTHROPIC_API_KEY=your_key
 GOOGLE_GENERATIVE_AI_API_KEY=your_key
 
-# Supabase
+# Supabase Auth (required)
 NEXT_PUBLIC_SUPABASE_URL=your_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_key
 
-# Brave Search (MCP)
-BRAVE_API_KEY=your_key
+# Optional
+EXA_API_KEY=your_key               # Web search
+LOG_LEVEL=debug                    # Debugging
+AGENT_NETWORK_DEBUG=true           # Agent network logs
 ```
 
-### Testing Approach
+### Development Patterns
 
-No specific test framework is configured. When implementing tests:
-1. Check if a testing framework needs to be added
-2. Follow Next.js testing best practices
-3. Test agents, tools, and workflows independently
+**Adding a Tool:**
+1. Create in `/src/mastra/tools/` with < 100ms response time
+2. Register in `/src/mastra/index.ts` tools object
+3. Add to relevant agents' tool arrays
 
-### UI Components
-
-Uses **shadcn/ui** with New York style theme and Lucide icons. When adding components:
-1. Use existing shadcn/ui components when possible
-2. Follow the established styling patterns in `/components/ui/`
-3. Maintain dark mode compatibility
-4. Use responsive design with Tailwind CSS
-
-### Common Development Tasks
-
-**Adding a new tool:**
-1. Create tool file in `/src/mastra/tools/`
-2. Implement job queuing pattern (return within 100ms)
+**Adding an Agent:**
+1. Create in `/src/mastra/agents/`
+2. Add prompt to `/src/mastra/prompts/agent-prompts.ts`
 3. Register in `/src/mastra/index.ts`
-4. Add to relevant agents
-5. Handle circular dependencies if needed
 
-**Adding a new workflow:**
-1. Create workflow file in `/src/mastra/workflows/`
-2. Define steps with proper error handling and Zod schemas
-3. Register in `/src/mastra/index.ts`
-4. Create corresponding tool to trigger it
-5. Implement progress tracking
+**UI Components:**
+- Uses shadcn/ui (New York style) with Lucide icons
+- Dark mode support via next-themes
+- Components in `/components/ui/`
 
-**Modifying chat behavior:**
-1. Primary logic is in `/src/mastra/agents/general-agent.ts`
-2. Chat UI is in `/app/protected/chat/page.tsx`
-3. Streaming logic is in `/app/api/chat/route.ts`
-4. Thread management in chat components
+### Task Management Tools Usage
 
-### Important Implementation Notes
+```typescript
+// Register a new task
+await taskRegistryTool({
+  action: 'register',
+  taskData: {
+    taskType: 'slide-generation',
+    taskDescription: 'Create AI presentation',
+    priority: 'high'
+  }
+});
 
-- **GPT-4o Search Preview** doesn't support temperature parameter
-- **Slide preview tool** must be called after slide generation for HTML preview
-- **MCP tools** are wrapped as Mastra tools for consistency
-- **Logging** uses PinoLogger for structured output
-- **TypeScript** strict mode is enabled with path alias `@/*`
+// Store and share artifacts
+await artifactStoreTool({
+  action: 'store',
+  taskId: jobId,
+  artifactData: {
+    artifactType: 'html',
+    content: htmlContent,
+    isPublic: true  // Allow other tasks to access
+  }
+});
+
+// Communicate between tasks
+await taskCommunicationTool({
+  action: 'send',
+  messageData: {
+    toTaskId: targetTaskId,
+    messageType: 'instruction',
+    content: 'Additional requirements...'
+  }
+});
+```
+
+### Models
+
+- **Claude Sonnet 4** (`claude-sonnet-4-20250514`): Default, best for Japanese
+- **OpenAI o3** (`o3-2025-04-16`): High-performance reasoning
+- **Gemini 2.5 Flash** (`gemini-2.5-flash`): Fast, cost-effective
+
+### Important Notes
+
+- **Japanese-First**: All agent prompts and UI text are in Japanese
+- **TypeScript**: Strict mode with `@/*` path alias
+- **Job Results**: Stored in `.job-results/{jobId}.json`
+- **Task IDs**: Same as job IDs for consistency
+- **SSE Streaming**: Real-time logs at `/api/agent-logs/stream/[jobId]`
+- **Performance**: Tools MUST return within 100ms
+- **Circular Dependencies**: Handle with dynamic imports in tools

@@ -2,35 +2,50 @@
 import { Mastra } from '@mastra/core/mastra';
 import { PinoLogger } from '@mastra/loggers';
 import { LibSQLStore } from '@mastra/libsql';
-import { weatherWorkflow } from './workflows/weather-workflow';
-import { webSearchWorkflow } from './workflows/web-search-workflow-mcp';
-import { slideGenerationWorkflow } from './workflows/slide-generation-workflow';
-import { weatherAgent } from './agents/weather-agent';
 import { generalAgent } from './agents/general-agent';
-import { workflowAgent } from './agents/workflow-agent';
-import { workflowSearchAgent } from './agents/workflow-search-agent';
+// New network agents
+import { ceoAgent, createCeoAgent } from './agents/network/ceo-agent';
+import { managerAgent, createManagerAgent } from './agents/network/manager-agent';
+import { workerAgent, createWorkerAgent } from './agents/network/worker-agent';
+// Task management
+import { initializeTaskManagementDB } from './task-management/db/migrations';
+import { logBus, ConsoleSink, DbSink } from './services/log-bus';
+import { ceoManagerWorkerWorkflow } from './workflows/task-workflow-v2';
+
+// Create storage instance
+const storage = new LibSQLStore({
+  // stores telemetry, evals, ... into memory storage, if it needs to persist, change to file:../mastra.db
+  url: ":memory:",
+});
 
 export const mastra = new Mastra({
-  workflows: { 
-    weatherWorkflow,
-    webSearchWorkflow,
-    slideGenerationWorkflow,
+  workflows: {
+    'ceo-manager-worker-workflow': ceoManagerWorkerWorkflow,
   },
   agents: { 
-    weatherAgent, 
     generalAgent,
-    workflowAgent,
-    workflowSearchAgent,
+    // New network agents
+    'ceo-agent': ceoAgent,
+    'manager-agent': managerAgent,
+    'worker-agent': workerAgent,
   },
-  storage: new LibSQLStore({
-    // stores telemetry, evals, ... into memory storage, if it needs to persist, change to file:../mastra.db
-    url: ":memory:",
-  }),
+  storage,
   logger: new PinoLogger({
     name: 'Mastra',
     level: (process.env.LOG_LEVEL || 'debug') as 'debug' | 'info' | 'warn' | 'error',  // デバッグレベルに変更してLLM呼び出しのモデル名を記録
   }),
 });
 
+// Initialize task management database
+initializeTaskManagementDB(':memory:').then(() => {
+  console.log('✅ Task management database initialized');
+  // ログシンクの初期化（Console + DB）
+  logBus.addSink(new ConsoleSink());
+  logBus.addSink(new DbSink());
+}).catch((error) => {
+  console.error('❌ Failed to initialize task management database:', error);
+});
+
 // エージェントをエクスポート
-export { generalAgent, workflowAgent, workflowSearchAgent };
+export { generalAgent, ceoAgent, managerAgent, workerAgent };
+export { createCeoAgent, createManagerAgent, createWorkerAgent };

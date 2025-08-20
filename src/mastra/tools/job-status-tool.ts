@@ -1,15 +1,9 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import * as fs from 'fs';
-import * as path from 'path';
+import { jobStore } from '../services/job-store';
+import { ensureTaskDBInitialized } from '../task-management/db/init';
 
-// ジョブ結果を保存するディレクトリ
-const JOB_RESULTS_DIR = path.join(process.cwd(), '.job-results');
-
-// ディレクトリが存在しない場合は作成
-if (!fs.existsSync(JOB_RESULTS_DIR)) {
-  fs.mkdirSync(JOB_RESULTS_DIR, { recursive: true });
-}
+// fs依存を廃止し、DBベースのJobStoreに移行
 
 interface JobStatus {
   status: 'queued' | 'running' | 'completed' | 'failed';
@@ -19,8 +13,7 @@ interface JobStatus {
   completedAt?: Date;
 }
 
-// 簡易的なジョブ状態管理（実際のプロダクションではデータベースを使用）
-const jobStatusStore = new Map<string, JobStatus>();
+// 互換のための型のみ維持
 
 interface JobResult {
   jobId: string;
@@ -48,11 +41,13 @@ export const jobStatusTool = createTool({
     completedAt: z.string().optional(),
   }),
   execute: async ({ context }) => {
+    await ensureTaskDBInitialized();
     const { jobId } = context;
     
-    const jobInfo = jobStatusStore.get(jobId);
+    // DB初期化遅延に対応
+    const status = await jobStore.getStatus(jobId);
     
-    if (!jobInfo) {
+    if (!status) {
       return {
         jobId,
         status: 'not_found' as const,
@@ -62,12 +57,12 @@ export const jobStatusTool = createTool({
     
     const response = {
       jobId,
-      status: jobInfo.status,
-      message: getStatusMessage(jobInfo.status),
-      result: jobInfo.result,
-      error: jobInfo.error,
-      startedAt: jobInfo.startedAt?.toISOString(),
-      completedAt: jobInfo.completedAt?.toISOString(),
+      status: (['queued','running','completed','failed'] as const).includes(status.status as any) ? (status.status as 'queued'|'running'|'completed'|'failed') : 'queued',
+      message: getStatusMessage(status.status),
+      result: undefined,
+      error: status.error ?? undefined,
+      startedAt: status.started_at ?? undefined,
+      completedAt: status.completed_at ?? undefined,
     };
     
     return response;
@@ -75,7 +70,7 @@ export const jobStatusTool = createTool({
 });
 
 // ジョブ状態を更新する関数（他のツールから呼び出し可能）
-export function updateJobStatus(
+export async function updateJobStatus(
   jobId: string, 
   status: 'queued' | 'running' | 'completed' | 'failed',
   options?: {
@@ -83,88 +78,76 @@ export function updateJobStatus(
     error?: string;
   }
 ) {
-  const existing = jobStatusStore.get(jobId) || { status: 'queued' };
-  
-  const updated: JobStatus = {
-    ...existing,
-    status,
-    ...(options?.result ? { result: options.result } : {}),
-    ...(options?.error ? { error: options.error } : {}),
-    ...(status === 'running' && !existing.startedAt ? { startedAt: new Date() } : {}),
-    ...(status === 'completed' || status === 'failed' ? { completedAt: new Date() } : {}),
-  };
-  
-  jobStatusStore.set(jobId, updated);
-  console.log(`📊 ジョブ状態更新: ${jobId} -> ${status}`);
+  await jobStore.updateStatus(jobId, status, { error: options?.error });
+  console.log(`📊 ジョブ状態更新(DB): ${jobId} -> ${status}`);
 }
 
 // ジョブ状態を初期化する関数
-export function initializeJob(jobId: string) {
-  jobStatusStore.set(jobId, {
-    status: 'queued',
-    startedAt: new Date(),
-  });
+export async function initializeJob(jobId: string) {
+  await jobStore.initializeJob(jobId);
 }
 
 // ワークフロー結果を格納する関数（ファイルシステムに保存）
-export function storeJobResult(
+export async function storeJobResult(
   jobId: string,
   result: unknown,
   workflowId: string = 'unknown'
 ) {
-  const jobResult = {
-    jobId,
-    result,
-    completedAt: new Date().toISOString(),
-    workflowId,
-  };
-  
-  // ファイルに保存
-  const filePath = path.join(JOB_RESULTS_DIR, `${jobId}.json`);
-  try {
-    fs.writeFileSync(filePath, JSON.stringify(jobResult, null, 2));
-    console.log(`💾 ジョブ結果をファイルに保存: ${filePath}`);
-  } catch (error) {
-    console.error(`❌ ジョブ結果の保存に失敗: ${error}`);
-  }
+  await jobStore.storeResult(jobId, result, workflowId);
 }
 
-// ワークフロー結果を取得する関数（ファイルシステムから読み込み）
-export function getJobResult(jobId: string): JobResult | null {
-  console.log(`🔍 ジョブ結果を検索: ${jobId}`);
+// ワークフロー結果を取得する関数（DBまたはファイルシステムから読み込み）
+export async function getJobResult(jobId: string): Promise<JobResult | null> {
+  console.log(`🔍 ジョブ結果を検索(DB): ${jobId}`);
   
-  const filePath = path.join(JOB_RESULTS_DIR, `${jobId}.json`);
-  
-  try {
-    if (fs.existsSync(filePath)) {
-      const data = fs.readFileSync(filePath, 'utf-8');
-      const result = JSON.parse(data);
-      console.log(`✅ ジョブ結果が見つかりました: ${jobId} (ファイル: ${filePath})`);
-      // Date文字列をDateオブジェクトに変換
-      result.completedAt = new Date(result.completedAt);
-      return result;
-    } else {
-      console.log(`❌ ジョブ結果ファイルが見つかりません: ${filePath}`);
-      // ディレクトリ内のファイル一覧を表示
-      const files = fs.readdirSync(JOB_RESULTS_DIR);
-      console.log(`📁 利用可能なジョブ結果: ${files.join(', ')}`);
-    }
-  } catch (error) {
-    console.error(`❌ ジョブ結果の読み込みエラー: ${error}`);
+  // まずDBから取得を試みる
+  const row = await jobStore.getResult(jobId);
+  if (row) {
+    return {
+      jobId: row.job_id,
+      result: row.result,
+      completedAt: new Date(row.created_at),
+      workflowId: row.workflow_id ?? 'unknown',
+    };
   }
   
-  return null;
+  // DBに無い場合はファイルシステムから読み込み
+  console.log(`📂 DBに結果が無いため、ファイルシステムから検索: ${jobId}`);
+  try {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    
+    const jobResultsDir = path.join(process.cwd(), '.job-results');
+    const filePath = path.join(jobResultsDir, `${jobId}.json`);
+    
+    // ファイルの存在確認
+    await fs.access(filePath);
+    
+    // ファイルを読み込み
+    const content = await fs.readFile(filePath, 'utf-8');
+    const fileData = JSON.parse(content);
+    
+    console.log(`✅ ファイルシステムから結果を取得: ${jobId}`);
+    
+    // ファイルデータからJobResult形式に変換
+    return {
+      jobId: fileData.jobId || jobId,
+      result: fileData.result,
+      completedAt: fileData.completedAt ? new Date(fileData.completedAt) : new Date(),
+      workflowId: fileData.workflowId || 'unknown',
+    };
+  } catch (error) {
+    console.log(`❌ ファイルシステムからも結果が見つかりません: ${jobId}`);
+    return null;
+  }
 }
 
 // 完了したジョブの一覧を取得する関数
-export function getCompletedJobs(): string[] {
+export async function getCompletedJobs(): Promise<string[]> {
   try {
-    const files = fs.readdirSync(JOB_RESULTS_DIR);
-    return files
-      .filter(file => file.endsWith('.json'))
-      .map(file => file.replace('.json', ''));
+    return await jobStore.listCompletedJobs(100);
   } catch (error) {
-    console.error(`❌ ジョブ一覧の取得エラー: ${error}`);
+    console.error(`❌ ジョブ一覧の取得エラー(DB): ${error}`);
     return [];
   }
 }

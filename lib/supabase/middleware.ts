@@ -11,6 +11,11 @@ export async function updateSession(request: NextRequest) {
   if (!hasEnvVars) {
     return supabaseResponse;
   }
+  
+  // Skip auth check for SSE routes
+  if (request.nextUrl.pathname.startsWith('/api/agent-logs/stream/')) {
+    return supabaseResponse;
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

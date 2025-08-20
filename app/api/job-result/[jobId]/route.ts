@@ -20,24 +20,75 @@ export async function GET(
     console.log(`📥 ジョブ結果取得リクエスト: ${jobId}`);
     
     // ジョブ結果を取得
-    const jobResult = getJobResult(jobId);
+    const jobResult = await getJobResult(jobId);
     
     if (!jobResult) {
       console.log(`❌ ジョブ結果が見つかりません: ${jobId}`);
       return new Response("Job result not found", { status: 404 });
     }
     
-    // スライド生成ワークフローの結果のみ返す
-    if (jobResult.workflowId !== 'slideGenerationWorkflow') {
-      console.log(`❌ スライド生成ジョブではありません: ${jobId}`);
-      return new Response("Not a slide generation job", { status: 400 });
+    // HTMLコードを再帰的に探すヘルパー関数
+    function findHtmlCode(obj: unknown, depth = 0): { htmlCode: string } | null {
+      if (depth > 5) return null; // 無限ループ防止
+      
+      if (typeof obj === 'string') {
+        // 文字列がHTMLの場合（マークダウンラップも考慮）
+        if (obj.includes('<!DOCTYPE') || obj.includes('<html')) {
+          // マークダウンコードブロックを除去
+          const codeBlockPattern = /^```(?:html|HTML)?\s*\n([\s\S]*?)\n?```\s*$/;
+          const match = obj.match(codeBlockPattern);
+          const cleanHtml = match ? match[1].trim() : obj;
+          return { htmlCode: cleanHtml };
+        }
+        return null;
+      }
+      
+      if (typeof obj !== 'object' || obj === null) {
+        return null;
+      }
+      
+      const record = obj as Record<string, unknown>;
+      
+      // htmlCode フィールドを直接探す
+      if ('htmlCode' in record && typeof record.htmlCode === 'string') {
+        const htmlCode = record.htmlCode as string;
+        // マークダウンコードブロックを除去
+        const codeBlockPattern = /^```(?:html|HTML)?\s*\n([\s\S]*?)\n?```\s*$/;
+        const match = htmlCode.match(codeBlockPattern);
+        const cleanHtml = match ? match[1].trim() : htmlCode;
+        return { htmlCode: cleanHtml };
+      }
+      
+      // result フィールドを探す
+      if ('result' in record) {
+        const found = findHtmlCode(record.result, depth + 1);
+        if (found) return found;
+      }
+      
+      // artifact フィールドを探す
+      if ('artifact' in record) {
+        const found = findHtmlCode(record.artifact, depth + 1);
+        if (found) return found;
+      }
+      
+      return null;
     }
     
-    const slideResult = jobResult.result;
+    // ワークフロー/ネットワーク共通でスライド結果を抽出
+    const slideResult = findHtmlCode(jobResult.result);
     
-    if (!slideResult || typeof slideResult !== 'object' || 
-        !('htmlCode' in slideResult) || !slideResult.htmlCode) {
+    if (!slideResult) {
       console.log(`❌ HTMLコードが見つかりません: ${jobId}`);
+      console.log(`Result structure:`, JSON.stringify(Object.keys(jobResult.result || {})));
+      
+      // デバッグ用: 結果の構造を詳細に出力
+      if (jobResult.result && typeof jobResult.result === 'object') {
+        const result = jobResult.result as Record<string, unknown>;
+        if ('result' in result && result.result && typeof result.result === 'object') {
+          console.log(`Result.result keys:`, Object.keys(result.result as Record<string, unknown>));
+        }
+      }
+      
       return new Response("HTML code not found", { status: 404 });
     }
 
