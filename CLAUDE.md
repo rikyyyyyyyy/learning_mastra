@@ -12,55 +12,119 @@ npm run start      # Start production server
 npm run lint       # Run ESLint
 ```
 
-### Package Management
-This project supports both npm and pnpm. All dependencies are managed through `package.json`.
+### Testing
+```bash
+# Test distributed task management system
+npx tsx src/mastra/task-management/test-task-management.ts
+
+# Test artifact and content-addressable storage system
+npx tsx src/mastra/task-management/test-artifact-system.ts
+
+# Test core task system
+npx tsx src/mastra/task-management/test-task-system.ts
+```
 
 ## Architecture Overview
 
-This is a **Mastra-based AI Assistant** built with Next.js that provides web search, weather information, and slide generation capabilities through an asynchronous job system.
+This is a **Mastra-based AI Assistant Platform** built with Next.js 15 featuring a distributed task management system with hierarchical agent networks (CEO-Manager-Worker pattern), content-addressable storage (CAS), and advanced directive management. The platform enables parallel execution of multiple AI-powered tasks with real-time monitoring, inter-task communication, artifact versioning, and dynamic control.
 
 ### Core Architecture Patterns
 
-1. **Agent-Tool-Workflow Pattern**
-   - **Agents** (`/src/mastra/agents/`): AI-powered assistants that handle user interactions
-   - **Tools** (`/src/mastra/tools/`): Return job IDs immediately (< 100ms) for async operations
-   - **Workflows** (`/src/mastra/workflows/`): Background processes that execute the actual work
+1. **Distributed Task Management System (v4.0)**
+   - **Task Registry**: Register and track multiple parallel tasks
+   - **Content-Addressable Storage (CAS)**: Git-like deduplication and storage efficiency
+   - **Artifact Version Control**: Revision tracking with parent references and commit messages
+   - **Directive Management**: Send additional instructions to running tasks
+   - **Policy Management**: CEO-level strategic policy setting
+   - **Batch Task Creation**: Create multiple tasks simultaneously
+   - Database backed by LibSQL with 12 main tables
 
-2. **Job-Based Async System**
-   - All long-running operations return job IDs immediately
-   - Jobs transition through states: queued → running → completed/failed
-   - Results are fetched via job ID when ready
-   - Job results stored in `.job-results` directory
+2. **Hierarchical Agent Network**
+   - **General Agent**: Entry point with task management and directive tools
+   - **CEO Agent**: Strategic planning with policy management and task viewing
+   - **Manager Agent**: Task breakdown with batch creation and directive handling
+   - **Worker Agent**: Execution with specialized domain tools
+   - Direct implementation via `agent-network-tool.ts` (no workflow layer)
+   - Maximum 10 iterations with automatic routing
+   - Dynamic agent creation via Agent Factory pattern
 
-3. **Memory Management**
-   - Thread-based conversation memory using LibSQL (in-memory by default)
-   - User isolation for security
-   - Shared memory between agents within a thread
+3. **Job-Based Async System**
+   - Tools must return within 100ms (use `setTimeout(() => {...}, 0)` for background work)
+   - Job IDs used as task IDs in the task management system
+   - Results stored in `.job-results/{jobId}.json`
+   - Real-time monitoring via SSE at `/api/agent-logs/stream/[jobId]`
+   - Status progression: `queued → running → completed/failed`
 
-4. **Authentication System**
-   - Supabase authentication with middleware session management
-   - Protected routes under `/protected/*`
-   - Complete auth flow (login, signup, forgot password, email confirmation)
+4. **Memory & Authentication**
+   - Thread-based memory using LibSQL (in-memory by default)
+   - Supabase authentication with protected routes under `/protected/*`
+   - Admin console for dynamic agent/network management at `/protected/admin/*`
 
-### Key Components
+### Database Schema
 
-**Main Entry Points:**
-- `/app/api/chat/route.ts`: Primary chat endpoint using general-agent
-- `/app/api/job-result/[jobId]/route.ts`: Job result retrieval endpoint
+The system uses 12 main tables:
 
-**Mastra Configuration:**
-- `/src/mastra/index.ts`: Central Mastra instance configuration
-- Integrates OpenAI (GPT-4o Search Preview), Anthropic (Claude Sonnet 4), and Google AI models
-- MCP (Model Context Protocol) support for Brave search
-- Configures agents, tools, workflows, and memory
+**Task Management:**
+- `network_tasks`: Core task tracking with status, priority, parent tasks
+- `network_directives`: Additional instructions for running tasks (policy_update, task_addition, priority_change, abort)
+- `job_status`, `job_results`: Async job tracking and results
+- `agent_logs`: Execution logs and debugging
 
-**Agent Implementation Pattern:**
-All agents follow this structure:
-- Use specific AI models (e.g., Claude Sonnet 4 for general-agent)
-- Have access to specific tools
-- Share thread memory
-- Return streaming responses
-- Japanese language instructions by default
+**Content & Artifacts:**
+- `content_store`: SHA-256 indexed content storage (deduplication)
+- `content_chunks`: Large content chunking for efficiency
+- `artifacts`: Task artifacts with metadata
+- `artifact_revisions`: Git-like version control with parent tracking
+
+**Configuration:**
+- `agent_definitions`: Dynamic agent configurations
+- `network_definitions`: Network topology and routing
+- `threads`: Conversation thread memory
+
+### Key Files
+
+**Configuration & Entry Points:**
+- `/src/mastra/index.ts`: Central Mastra configuration (agents, tools, memory)
+- `/src/mastra/prompts/agent-prompts.ts`: All agent prompts in Japanese (centralized)
+- `/src/mastra/config/model-registry.ts`: Multi-model management
+- `/src/mastra/config/tool-registry.ts`: Role-based tool assignment
+- `/app/api/chat/route.ts`: Main chat endpoint
+- `/app/protected/chat/page.tsx`: Chat UI with model selector
+
+**Task Management System:**
+- `/src/mastra/task-management/db/`: 
+  - `schema.ts`: Complete database schema
+  - `migrations.ts`: Database initialization
+  - `dao.ts`: Data Access Object pattern
+  - `cas-dao.ts`: Content-Addressable Storage DAO
+- `/src/mastra/task-management/tools/`:
+  - `task-registry-tool.ts`: Register/list/update tasks
+  - `directive-management-tool.ts`: Create/check directives to running tasks
+  - `policy-management-tool.ts`: Save/retrieve CEO-level policies
+  - `batch-task-creation-tool.ts`: Create multiple tasks in batch
+  - `task-viewer-tool.ts`: View tasks and network summaries
+  - `content-store-tool.ts`: Content-addressable storage operations
+  - `artifact-io-tool.ts`: Artifact creation with version control
+  - `artifact-diff-tool.ts`: Generate diffs between revisions
+  - `final-result-tool.ts`: Store final results
+
+**Agent Network:**
+- `/src/mastra/tools/agent-network-tool.ts`: Direct NewAgentNetwork implementation
+- `/src/mastra/agents/factory.ts`: Dynamic agent creation
+- `/src/mastra/agents/network/`: CEO, Manager, Worker agents
+- `/src/mastra/utils/agent-log-store.ts`: In-memory log store with EventEmitter
+
+**Admin Interface:**
+- `/app/protected/admin/agents/`: Agent definition management
+- `/app/protected/admin/networks/`: Network configuration
+- `/app/api/admin/agents/`: Agent management API
+- `/app/api/admin/models/`: Model configuration API
+- `/app/api/admin/networks/`: Network management API
+- `/app/api/admin/tools/`: Tool registry API
+
+**Database Viewers:**
+- `/app/api/db-viewer/tasks/`: Task execution monitoring
+- `/app/api/db-viewer/directives/`: Directive status tracking
 
 **Tool Implementation Pattern:**
 Tools must:
@@ -91,51 +155,146 @@ GOOGLE_GENERATIVE_AI_API_KEY=your_key
 NEXT_PUBLIC_SUPABASE_URL=your_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_key
 
-# Brave Search (MCP)
-BRAVE_API_KEY=your_key
+# Optional
+EXA_API_KEY=your_key               # Web search
+LOG_LEVEL=debug                    # Debugging
+AGENT_NETWORK_DEBUG=true           # Agent network logs
 ```
 
-### Testing Approach
+### Development Patterns
 
-No specific test framework is configured. When implementing tests:
-1. Check if a testing framework needs to be added
-2. Follow Next.js testing best practices
-3. Test agents, tools, and workflows independently
+**Adding a Tool:**
+1. Create in `/src/mastra/tools/` with < 100ms response time
+2. Register in `/src/mastra/config/tool-registry.ts`
+3. Add to relevant role's tool arrays
+4. Update `/src/mastra/index.ts` tools object
 
-### UI Components
+**Adding an Agent:**
+1. Option A: Use Admin Console at `/protected/admin/agents/`
+2. Option B: Create programmatically:
+   - Create in `/src/mastra/agents/`
+   - Add prompt to `/src/mastra/prompts/agent-prompts.ts`
+   - Register in `/src/mastra/index.ts`
 
-Uses **shadcn/ui** with New York style theme and Lucide icons. When adding components:
-1. Use existing shadcn/ui components when possible
-2. Follow the established styling patterns in `/components/ui/`
-3. Maintain dark mode compatibility
-4. Use responsive design with Tailwind CSS
+**UI Components:**
+- Uses shadcn/ui (New York style) with Lucide icons
+- Dark mode support via next-themes
+- Components in `/components/ui/`
 
-### Common Development Tasks
+### Task Management Tools Usage
 
-**Adding a new tool:**
-1. Create tool file in `/src/mastra/tools/`
-2. Implement job queuing pattern (return within 100ms)
-3. Register in `/src/mastra/index.ts`
-4. Add to relevant agents
-5. Handle circular dependencies if needed
+```typescript
+// Register a new task
+await taskRegistryTool({
+  action: 'register',
+  taskData: {
+    taskType: 'slide-generation',
+    taskDescription: 'Create AI presentation',
+    priority: 'high',
+    parentTaskId: 'parent-task-id' // Optional
+  }
+});
 
-**Adding a new workflow:**
-1. Create workflow file in `/src/mastra/workflows/`
-2. Define steps with proper error handling and Zod schemas
-3. Register in `/src/mastra/index.ts`
-4. Create corresponding tool to trigger it
-5. Implement progress tracking
+// Send directive to running task
+await directiveManagementTool({
+  action: 'create_directive',
+  networkId: 'network-123',
+  directiveData: {
+    content: 'Increase quality standards and add more detail',
+    type: 'policy_update', // or 'task_addition', 'priority_change', 'abort'
+    source: 'general-agent'
+  }
+});
 
-**Modifying chat behavior:**
-1. Primary logic is in `/src/mastra/agents/general-agent.ts`
-2. Chat UI is in `/app/protected/chat/page.tsx`
-3. Streaming logic is in `/app/api/chat/route.ts`
-4. Thread management in chat components
+// Save CEO-level policy
+await policyManagementTool({
+  action: 'save_policy',
+  networkId: 'network-123',
+  policy: {
+    strategy: 'Comprehensive market analysis',
+    priorities: ['Data accuracy', 'Depth of analysis'],
+    successCriteria: ['All competitors identified'],
+    qualityStandards: ['Use reliable sources only']
+  }
+});
 
-### Important Implementation Notes
+// Create batch tasks
+await batchTaskCreationTool({
+  action: 'create_batch',
+  networkId: 'network-123',
+  tasks: [
+    { task_type: 'research', task_description: 'Market analysis', priority: 'high' },
+    { task_type: 'analysis', task_description: 'Competitor study', priority: 'medium' }
+  ]
+});
 
-- **GPT-4o Search Preview** doesn't support temperature parameter
-- **Slide preview tool** must be called after slide generation for HTML preview
-- **MCP tools** are wrapped as Mastra tools for consistency
-- **Logging** uses PinoLogger for structured output
-- **TypeScript** strict mode is enabled with path alias `@/*`
+// Store content with deduplication
+const { hash } = await contentStoreTool({
+  action: 'store',
+  content: htmlContent,
+  contentType: 'text/html'
+});
+
+// Create artifact with version control
+await artifactIOTool({
+  action: 'create',
+  jobId: 'job-123',
+  mimeType: 'text/html',
+  parentRevisionId: 'parent-rev-id', // Optional
+  commitMessage: 'Initial HTML generation',
+  author: 'worker-agent'
+});
+
+// Generate diff between revisions
+await artifactDiffTool({
+  action: 'diff',
+  fromRevisionId: 'rev-1',
+  toRevisionId: 'rev-2'
+});
+```
+
+### Content-Addressable Storage (CAS)
+
+The system implements Git-like content storage:
+- **Deduplication**: Content stored once, referenced by SHA-256 hash
+- **References**: Use `ref:hash` format to reference stored content
+- **Chunking**: Large content split into chunks for efficiency
+- **Version Control**: Track artifact revisions with parent references
+- **Space Efficiency**: Significant storage savings through deduplication
+
+### Models
+
+- **Claude Sonnet 4** (`claude-sonnet-4-20250514`): Default, best for Japanese
+- **GPT-5** (`gpt-5`): Latest OpenAI model
+- **OpenAI o3** (`o3-2025-04-16`): High-performance reasoning
+- **Gemini 2.5 Flash** (`gemini-2.5-flash`): Fast, cost-effective
+
+### API Endpoints
+
+**Chat & Streaming:**
+- `POST /api/chat`: Main chat endpoint with streaming
+
+**Admin Management:**
+- `GET/POST /api/admin/agents`: Agent definition management
+- `GET/POST /api/admin/networks`: Network configuration
+- `GET/POST /api/admin/models`: Model management
+- `GET /api/admin/tools`: Available tools listing
+
+**Job & Monitoring:**
+- `GET /api/job-result/[jobId]`: Retrieve async job results
+- `GET /api/agent-logs/stream/[jobId]`: Real-time SSE logs
+- `GET /api/db-viewer/tasks`: Task execution monitoring
+- `GET /api/db-viewer/directives`: Directive status tracking
+
+### Important Notes
+
+- **Japanese-First**: All agent prompts and UI text are in Japanese
+- **TypeScript**: Strict mode with `@/*` path alias
+- **Job Results**: Stored in `.job-results/{jobId}.json`
+- **Task IDs**: Same as job IDs for consistency
+- **SSE Streaming**: Real-time logs at `/api/agent-logs/stream/[jobId]`
+- **Performance**: Tools MUST return within 100ms
+- **Circular Dependencies**: Handle with dynamic imports in tools
+- **CAS References**: Use `ref:hash` format for stored content
+- **Admin Console**: Dynamic agent/network management at `/protected/admin/`
+- **Database**: LibSQL with in-memory storage (`:memory:`) by default
