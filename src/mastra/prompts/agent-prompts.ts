@@ -29,6 +29,13 @@ const AGENT_PROMPT_TEMPLATES = {
     - タスクはagentNetworkToolで実行（taskType, taskDescription, taskParametersを設定）
     - ジョブ結果の確認はユーザーが明示的に要求した時のみ
     - 詳細な手順はdocsReaderToolで取得
+
+    【ツール使用の厳格ルール】
+    - すべてのツール呼び出しは、入力を必ず「JSONオブジェクト（辞書）」で渡すこと。
+    - 文字列や配列を直接 input として渡してはならない。
+    - 例: docsReaderTool を使う場合の正しい呼び出し入力
+      { "path": "docs/rules/slide-html-rules.md", "startMarker": "", "endMarker": "", "maxChars": 4000 }
+    - slidePreviewTool は { "jobId": "..." } の形で呼ぶこと。
   `,
 
   // CEO Agent (戦略的タスクディレクター)
@@ -81,6 +88,10 @@ const AGENT_PROMPT_TEMPLATES = {
     【重要】
     - CEOから受け取ったNetwork IDを使用
     - Worker結果は必ずDBに保存（update_result）
+
+    【ツール使用の厳格ルール】
+    - ツール入力は必ずJSONオブジェクト（辞書）。文字列・配列は不可。
+    - taskManagementTool の各アクションも { "action": string, ... } の辞書形で入力する。
   `,
 
   // Worker Agent (タスク実行者)
@@ -105,6 +116,11 @@ const AGENT_PROMPT_TEMPLATES = {
     1. タスク受信→理解
     2. ツール使用→実行
     3. 結果返却→次の指示待機
+
+    【ツール使用の厳格ルール】
+    - docsReaderTool 等のツールを使う際は、入力を必ずJSONオブジェクトで指定（辞書）。
+    - 文字列や配列を直接 input として渡してはならない（Anthropic: tool_use.input must be a dictionary）。
+    - 例: { "path": "docs/rules/slide-html-rules.md" } （必要なら startMarker, endMarker, maxChars を追加）
   `,
 };
 

@@ -79,7 +79,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
         const systemContext = extractSystemContext(rc);
         
         // CEOエージェント（選択モデル）
-        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext });
+        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined });
 
         // ポリシーJSONを生成
         const { text } = await ceo.generate([
@@ -202,7 +202,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
 
         if (directives.hasPending) {
           const systemContext = extractSystemContext(rc);
-          const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext });
+          const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined });
           const { text } = await ceo.generate([
             {
               role: 'user',
@@ -256,12 +256,13 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
 
         // タスク分解（ManagerがJSON計画を出力）
         const systemContextForManager = extractSystemContext(rc);
-        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext: systemContextForManager });
+        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext: systemContextForManager || undefined });
         const { text: planText } = await manager.generate([
           {
             role: 'user',
             content:
-              `次のタスクを5-6個程度の小タスクに分解し、JSON配列で出力してください。` +
+              `次のタスクを観点/カテゴリベースで横方向に分解し、5-6個程度の独立した小タスクとしてJSON配列で出力してください。` +
+              `カテゴリは互いに重複せず、依存関係は原則として持たない並列関係にしてください（例: 政治/経済/技術/社会/環境 等）。` +
               `各要素は {"taskType": string, "taskDescription": string, "taskParameters"?: object, "stepNumber"?: number}。` +
               `出力はJSON配列のみ（バッククオート不要）。` +
               `元タスク: ${inputData.taskType} - ${inputData.taskDescription}`,
@@ -336,8 +337,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           if (!resource) rc.set?.('resourceId', jobId);
         } catch {}
         const systemContext = extractSystemContext(rc);
-        const worker = createRoleAgent({ role: 'WORKER', modelKey: selectedModel, systemContext });
-        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext });
+        const worker = createRoleAgent({ role: 'WORKER', modelKey: selectedModel, systemContext: systemContext || undefined });
+        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext: systemContext || undefined });
 
         let loopCount = 0;
         while (loopCount < 20) {
@@ -351,65 +352,118 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           // 実行開始をDBに反映
           await taskManagementTool.execute({ context: { action: 'update_status', networkId: jobId, taskId, status: 'running' }, runtimeContext: rc });
 
+          // サブタスク単位で会話履歴を分離（連続メッセージ一貫性）
+          const taskThreadId = `${jobId}:${taskId}`;
+
           agentLogStore.addLogEntry(
             jobId,
             formatAgentMessage('worker', 'Worker Agent', `小タスク実行開始: ${current.description}`, loopCount, 'request')
           );
 
-          // 実行（簡易）
-          const { text: workText } = await worker.generate([
-            {
-              role: 'user',
-              content:
-                `次の小タスクを実行し、要約結果を200-400字で返してください。` +
-                `小タスク: ${current.taskType} - ${current.description}`,
-            },
-          ], { memory: { thread: jobId, resource: jobId }, runtimeContext: rc });
+          // 受理まで多段実行（continue と revise を区別し、中間結果は保存しない）
+          const maxAttempts = 10;
+          let attemptCount = 0;
+          let accepted = false;
+          let lastDecision: 'initial' | 'continue' | 'revise' = 'initial';
+          let reviseInstruction: string | undefined = undefined;
 
-          // Managerによる検収
-          const { text: review } = await manager.generate([
-            {
-              role: 'user',
-              content:
-                `次の結果をレビュし、"decision"が"accept"または"redo"のJSONで出力してください。` +
-                `redoなら改善指示"instruction"も含めてください。` +
-                `出力は {"decision":"accept"|"redo","instruction"?:string} のJSON（バッククオート不要）。\n結果: ${workText}`,
-            },
-          ], { memory: { thread: jobId, resource: jobId }, runtimeContext: rc });
+          while (attemptCount < maxAttempts && !accepted) {
+            attemptCount++;
 
-          let decision: 'accept' | 'redo' = 'accept';
-          let instruction: string | undefined;
-          try {
-            const obj = JSON.parse(review || '{}');
-            if (obj.decision === 'redo') {
-              decision = 'redo';
-              instruction = typeof obj.instruction === 'string' ? obj.instruction : undefined;
+            // Worker 実行プロンプト
+            const workerPrompt = (
+              lastDecision === 'initial'
+                ? `次の小タスクを実行してください。小タスク: ${current.taskType} - ${current.description}`
+                : lastDecision === 'continue'
+                  ? `前回の続きから、重複を避けて継続してください。必要に応じて前回までの内容を踏まえて欠落部分を埋めてください。`
+                  : `改善指示: ${reviseInstruction ?? '品質を向上'} に従い、必要箇所のみ修正した完全な最新版を出力してください。`
+            ) + `\n\n【ツール使用ルール】\n- 必要に応じて docsReaderTool / exaMCPSearchTool を使用してよい。\n- すべてのツール入力は必ずJSONオブジェクト（辞書）で指定する（例: { \"path\": \"docs/rules/slide-html-rules.md\" }）。文字列や配列を直接渡してはならない。\n- 不要な場合はツールを呼び出さずにテキスト結果のみでもよい。`;
+
+            agentLogStore.addLogEntry(
+              jobId,
+              formatAgentMessage(
+                'worker',
+                'Worker Agent',
+                attemptCount === 1
+                  ? `小タスクを実行: ${current.description}`
+                  : `小タスクを再実行（試行${attemptCount}回目）`,
+                loopCount,
+                'request'
+              )
+            );
+
+            const { text: workText } = await worker.generate([
+              { role: 'user', content: workerPrompt },
+            ], { memory: { thread: taskThreadId, resource: taskThreadId }, runtimeContext: rc });
+
+            // Manager による検収（accept / continue / revise）
+            const { text: review } = await manager.generate([
+              {
+                role: 'user',
+                content:
+                  `次の結果をレビューし、JSONで判定してください。` +
+                  `decision: "accept" | "continue" | "revise" のいずれか。` +
+                  `- continue: 出力が部分的/未完了/トークン上限で途切れているなど、続きが必要な場合。` +
+                  `- revise: 誤り/品質不足/要件逸脱があり修正が必要な場合（具体的なinstructionを出す）。` +
+                  `- accept: 要件を満たして十分な深さがあり受理できる場合。` +
+                  `出力は {"decision":"accept"|"continue"|"revise","instruction"?:string} のJSON（バッククオート不要）。` +
+                  `\n【重要】このレビューではツールを呼び出さず、テキストのみでJSONを返してください。` +
+                  `\n結果: ${workText}`,
+              },
+            ], { memory: { thread: taskThreadId, resource: taskThreadId }, runtimeContext: rc });
+
+            let decision: 'accept' | 'continue' | 'revise' = 'accept';
+            let instruction: string | undefined;
+            try {
+              const obj = JSON.parse(review || '{}');
+              if (obj.decision === 'continue' || obj.decision === 'revise') {
+                decision = obj.decision;
+                instruction = typeof obj.instruction === 'string' ? obj.instruction : undefined;
+              }
+            } catch {
+              // 既定はaccept
             }
-          } catch {
-            // 既定はaccept
-          }
 
-          if (decision === 'redo') {
-            agentLogStore.addLogEntry(
-              jobId,
-              formatAgentMessage('manager', 'Manager Agent', `結果が不十分のため差し戻し: ${instruction ?? ''}`, loopCount, 'response')
-            );
-            // 差し戻し: 簡易に再実行して受理
-            const { text: retry } = await worker.generate([
-              { role: 'user', content: `改善指示: ${instruction ?? '品質を向上'} に従って再実行してください。` },
-            ], { memory: { thread: jobId, resource: jobId }, runtimeContext: rc });
-            await taskManagementTool.execute({ context: { action: 'update_result', networkId: jobId, taskId, result: { text: retry, accepted: true } }, runtimeContext: rc });
-            await taskManagementTool.execute({ context: { action: 'update_status', networkId: jobId, taskId, status: 'completed' }, runtimeContext: rc });
-            agentLogStore.addLogEntry(
-              jobId,
-              formatAgentMessage('worker', 'Worker Agent', `小タスクを再実行し完了しました。`, loopCount, 'response')
-            );
-          } else {
-            await taskManagementTool.execute({ context: { action: 'update_result', networkId: jobId, taskId, result: { text: workText, accepted: true } }, runtimeContext: rc });
+            if (decision === 'continue') {
+              agentLogStore.addLogEntry(
+                jobId,
+                formatAgentMessage('manager', 'Manager Agent', `出力が未完了のため続きの生成を要求します。`, loopCount, 'response')
+              );
+              lastDecision = 'continue';
+              // 継続: 完了/結果保存は行わず次の試行へ
+              continue;
+            }
+
+            if (decision === 'revise') {
+              agentLogStore.addLogEntry(
+                jobId,
+                formatAgentMessage('manager', 'Manager Agent', `修正が必要: ${instruction ?? ''}`, loopCount, 'response')
+              );
+              reviseInstruction = instruction;
+              lastDecision = 'revise';
+              // 修正: 完了/結果保存は行わず次の試行へ
+              continue;
+            }
+
+            // 受理: 小タスクの完全な最終版を生成させて保存し、完了に更新
+            const { text: finalWork } = await worker.generate([
+              { role: 'user', content: `これまでの内容を踏まえ、この小タスクの完全な最終版のみを1つの出力として返してください。重複・冗長は避け、要件を満たす完全版を提示してください。` },
+            ], { memory: { thread: taskThreadId, resource: taskThreadId }, runtimeContext: rc });
+            await taskManagementTool.execute({ context: { action: 'update_result', networkId: jobId, taskId, result: { text: finalWork, accepted: true } }, runtimeContext: rc });
             await taskManagementTool.execute({ context: { action: 'update_status', networkId: jobId, taskId, status: 'completed' }, runtimeContext: rc });
             agentLogStore.addLogEntry(
               jobId,
               formatAgentMessage('manager', 'Manager Agent', `結果を受理し保存しました。`, loopCount, 'response')
+            );
+            accepted = true;
+          }
+
+          if (!accepted) {
+            // 最大試行数を超えても受理されない場合は失敗としてマーク
+            await taskManagementTool.execute({ context: { action: 'update_status', networkId: jobId, taskId, status: 'failed' }, runtimeContext: rc });
+            agentLogStore.addLogEntry(
+              jobId,
+              formatAgentMessage('manager', 'Manager Agent', `複数回の差し戻し後も受理できず、タスクを失敗としてマークしました。`, loopCount, 'response')
             );
           }
         }
@@ -441,7 +495,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           if (!resource) rc.set?.('resourceId', jobId);
         } catch {}
         const systemContext = extractSystemContext(rc);
-        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext });
+        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined });
 
         // 全小タスクの結果を収集
         const listRes = await taskManagementTool.execute({ context: { action: 'list_network_tasks', networkId: jobId }, runtimeContext: rc });
