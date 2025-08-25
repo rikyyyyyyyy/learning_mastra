@@ -4,7 +4,7 @@ import { initializeJob, updateJobStatus, storeJobResult } from './job-status-too
 import { NewAgentNetwork } from '@mastra/core/network/vNext';
 import { Agent } from '@mastra/core/agent';
 import { RuntimeContext } from '@mastra/core/di';
-import { resolveModel } from '../config/model-registry';
+import { resolveModel, resolveModelWithOptions } from '../config/model-registry';
 import { createRoleAgent } from '../agents/factory';
 import { buildNetwork } from '../networks/builder';
 import { resolveNetworkFromDB } from '../networks/resolver';
@@ -221,7 +221,10 @@ const executeAgentNetwork = async (
 
     // 選択されたモデルをruntimeContextから取得し、対応するLanguageModelを解決
     const selectedModelType = (runtimeContext as { get: (key: string) => unknown })?.get?.('selectedModel') as string | undefined;
-    const { aiModel: networkModel, info: networkModelInfo } = resolveModel(selectedModelType);
+    const modelOptions = (runtimeContext as { get: (key: string) => unknown })?.get?.('modelOptions') as Record<string, unknown> | undefined;
+    const { aiModel: networkModel, info: networkModelInfo } = modelOptions
+      ? resolveModelWithOptions(selectedModelType, modelOptions)
+      : resolveModel(selectedModelType);
     logger.info(`エージェントネットワーク用モデル model=${networkModelInfo.displayName} provider=${networkModelInfo.provider}`);
 
     // RuntimeContextからシステムコンテキストを抽出
@@ -231,9 +234,9 @@ const executeAgentNetwork = async (
     }
 
     // 選択モデルで各ロールのエージェントを動的生成（ファクトリ経由）
-    const ceoAgent = createRoleAgent({ role: 'CEO', modelKey: selectedModelType, memory: sharedMemory, systemContext });
-    const managerAgent = createRoleAgent({ role: 'MANAGER', modelKey: selectedModelType, memory: sharedMemory, systemContext });
-    const workerAgent = createRoleAgent({ role: 'WORKER', modelKey: selectedModelType, memory: sharedMemory, systemContext });
+    const ceoAgent = createRoleAgent({ role: 'CEO', modelKey: selectedModelType, memory: sharedMemory, systemContext, modelOptions });
+    const managerAgent = createRoleAgent({ role: 'MANAGER', modelKey: selectedModelType, memory: sharedMemory, systemContext, modelOptions });
+    const workerAgent = createRoleAgent({ role: 'WORKER', modelKey: selectedModelType, memory: sharedMemory, systemContext, modelOptions });
 
     // メモリ設定を準備
     const resourceId = (runtimeContext as { get: (key: string) => unknown })?.get?.('resourceId') as string | undefined;
@@ -249,7 +252,7 @@ const executeAgentNetwork = async (
     // エージェントネットワークを作成（DB定義があれば優先採用。無ければ従来の固定構築）
     let agentNetwork: InstanceType<typeof NewAgentNetwork>;
     try {
-      const resolved = await resolveNetworkFromDB({ memory });
+      const resolved = await resolveNetworkFromDB({ memory, modelOptions });
       logger.info(`DB定義のネットワークを使用します id=${resolved.network.id}`);
       agentNetwork = resolved.network as unknown as InstanceType<typeof NewAgentNetwork>;
     } catch (e) {

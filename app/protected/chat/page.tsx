@@ -59,41 +59,7 @@ interface JobData {
   connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
 }
 
-type AIModel = "claude-sonnet-4" | "openai-o3" | "gemini-2.5-flash" | "gpt-5";
-
-interface ModelInfo {
-  id: AIModel;
-  name: string;
-  provider: string;
-  description: string;
-}
-
-const AI_MODELS: ModelInfo[] = [
-  {
-    id: "claude-sonnet-4",
-    name: "Claude Sonnet 4",
-    provider: "Anthropic",
-    description: "高度な推論と創造的なタスクに最適"
-  },
-  {
-    id: "gpt-5",
-    name: "GPT-5",
-    provider: "OpenAI",
-    description: "最新世代の汎用モデル。高度な推論・生成能力"
-  },
-  {
-    id: "openai-o3",
-    name: "OpenAI o3",
-    provider: "OpenAI",
-    description: "最新の高性能推論モデル"
-  },
-  {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    provider: "Google",
-    description: "高速・低コストで思考機能搭載"
-  }
-];
+type RegistryModel = { key: string; info: { displayName: string; provider: string; modelId: string; capabilities?: { reasoning?: boolean } } };
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([
@@ -106,9 +72,13 @@ export default function ChatPage() {
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<AIModel>("claude-sonnet-4");
+  const [models, setModels] = useState<RegistryModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("claude-sonnet-4");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [toolMode, setToolMode] = useState<'network'|'workflow'|'both'>('both');
+  // Reasoning UI state
+  const [reasoningEnabled, setReasoningEnabled] = useState(false);
+  const [reasoningEffort, setReasoningEffort] = useState<'low'|'medium'|'high'>('medium');
   const [showSlidePreview, setShowSlidePreview] = useState(false);
   const [currentSlidePreview, setCurrentSlidePreview] = useState<{
     jobId: string;
@@ -144,6 +114,29 @@ export default function ChatPage() {
 
   // 現在選択されているジョブのデータを取得
   const selectedJob = selectedJobId ? activeJobs.get(selectedJobId) : null;
+
+  // モデル一覧を読み込み（単一情報源: /api/admin/models）
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/models');
+        const data: RegistryModel[] = await res.json();
+        if (cancelled) return;
+        setModels(data);
+        // 既存の選択が一覧に無ければ先頭に切替
+        const exists = data.some(m => m.key === selectedModel);
+        if (!exists) {
+          const fallback = data[0]?.key || 'claude-sonnet-4';
+          setSelectedModel(fallback);
+        }
+      } catch (e) {
+        console.error('モデル一覧の取得に失敗:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // リアルタイムログストリーミングを開始する関数
   const startRealtimeLogStreaming = (jobId: string) => {
@@ -753,6 +746,12 @@ export default function ChatPage() {
           threadId: threadIdRef.current, // threadIdを送信
           model: selectedModel, // 選択されたモデルを送信
           toolMode,
+          modelOptions: (() => {
+            const current = models.find(m => m.key === selectedModel);
+            const supportsReasoning = !!current?.info.capabilities?.reasoning;
+            if (!supportsReasoning || !reasoningEnabled) return undefined;
+            return { reasoning: { effort: reasoningEffort } };
+          })(),
         }),
       });
 
@@ -943,6 +942,30 @@ export default function ChatPage() {
                 </select>
               </div>
             </div>
+            {/* Reasoning 設定（対応モデルのみ表示） */}
+            {(() => {
+              const current = models.find(m => m.key === selectedModel);
+              const supportsReasoning = !!current?.info.capabilities?.reasoning;
+              if (!supportsReasoning) return null;
+              return (
+                <div className="relative">
+                  <div className="flex items-center gap-2 px-2 py-2 bg-secondary text-foreground rounded-xl border">
+                    <label className="text-sm">Reasoning</label>
+                    <input type="checkbox" className="accent-primary" checked={reasoningEnabled} onChange={(e) => setReasoningEnabled(e.target.checked)} />
+                    <select
+                      className="bg-transparent outline-none text-sm disabled:opacity-50"
+                      value={reasoningEffort}
+                      onChange={(e) => setReasoningEffort(e.target.value as 'low'|'medium'|'high')}
+                      disabled={!reasoningEnabled}
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </div>
+                </div>
+              );
+            })()}
             <div className="flex items-center gap-3">
             {/* モデル選択ドロップダウン */}
             <div className="relative">
@@ -951,18 +974,18 @@ export default function ChatPage() {
                 className="flex items-center gap-2 px-4 py-2.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-xl transition-all duration-200 shadow-sm hover:shadow border"
               >
                 <span className="text-sm">
-                  {AI_MODELS.find(m => m.id === selectedModel)?.name}
+                  {models.find(m => m.key === selectedModel)?.info.displayName || selectedModel}
                 </span>
                 <ChevronDown className="w-4 h-4" />
               </button>
               
               {showModelDropdown && (
                 <div className="absolute right-0 mt-2 w-72 bg-card/95 backdrop-blur-xl rounded-2xl shadow-2xl border py-2 z-10 animate-in fade-in slide-in-from-top-2 duration-200">
-                  {AI_MODELS.map((model) => (
+                  {models.map((model) => (
                     <button
-                      key={model.id}
+                      key={model.key}
                       onClick={() => {
-                        setSelectedModel(model.id);
+                        setSelectedModel(model.key);
                         setShowModelDropdown(false);
                       }}
                       className="w-full px-4 py-3 text-left hover:bg-accent transition-all duration-200 group rounded-lg mx-2"
@@ -970,13 +993,13 @@ export default function ChatPage() {
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="font-medium text-foreground">
-                            {model.name}
+                            {model.info.displayName}
                           </div>
                           <div className="text-sm text-muted-foreground">
-                            {model.provider} - {model.description}
+                            {model.info.provider} - {model.info.modelId}
                           </div>
                         </div>
-                        {selectedModel === model.id && (
+                        {selectedModel === model.key && (
                           <div className="w-2 h-2 bg-primary rounded-full" />
                         )}
                       </div>
@@ -1454,4 +1477,4 @@ export default function ChatPage() {
     />
   </div>
   );
-}
+  }

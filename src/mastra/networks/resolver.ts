@@ -7,6 +7,7 @@ import { resolveModel } from '../config/model-registry';
 export async function resolveNetworkFromDB(options: {
   networkId?: string; // 指定が無ければ enabled の最新を取得
   memory?: unknown;
+  modelOptions?: Record<string, unknown>;
 }): Promise<{
   network: ReturnType<typeof buildNetwork>;
   agentMap: Record<string, ReturnType<typeof createAgentFromDefinition>>;
@@ -24,7 +25,10 @@ export async function resolveNetworkFromDB(options: {
 
   // ネットワークモデルは、デフォルト：最初のエージェントの model_key（無ければ既定）
   const primaryModelKey = selected[0].model_key;
-  const { aiModel, info } = resolveModel(primaryModelKey);
+  const { resolveModelWithOptions } = await import('../config/model-registry');
+  const { aiModel, info } = options.modelOptions
+    ? resolveModelWithOptions(primaryModelKey, options.modelOptions)
+    : resolveModel(primaryModelKey);
 
   // エージェント生成
   const agentMap: Record<string, ReturnType<typeof createAgentFromDefinition>> = {};
@@ -37,7 +41,7 @@ export async function resolveNetworkFromDB(options: {
       promptText: agentDef.prompt_text,
       tools: agentDef.tools,
       memory: options.memory,
-    });
+    }, options.modelOptions);
     agentMap[agentDef.id] = agent as any;
   }
 
@@ -67,4 +71,3 @@ export async function resolveNetworkFromDB(options: {
 
   return { network, agentMap, modelInfo: info };
 }
-

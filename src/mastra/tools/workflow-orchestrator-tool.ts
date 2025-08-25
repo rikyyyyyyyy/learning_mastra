@@ -9,7 +9,11 @@ export const workflowOrchestratorTool = createTool({
   inputSchema: z.object({
     taskType: z.enum(['web-search', 'slide-generation', 'weather', 'other']).describe('Type of task'),
     taskDescription: z.string().min(1),
-    taskParameters: z.record(z.unknown()).describe('Task-specific parameters (object expected)'),
+    taskParameters: z
+      .record(z.unknown())
+      .describe('Task-specific parameters (object expected)')
+      .optional()
+      .default({}),
     context: z
       .object({
         constraints: z.record(z.unknown()).optional(),
@@ -29,9 +33,10 @@ export const workflowOrchestratorTool = createTool({
     const { taskType, taskDescription, taskParameters, context: taskContext } = context as {
       taskType: 'web-search' | 'slide-generation' | 'weather' | 'other';
       taskDescription: string;
-      taskParameters: Record<string, unknown>;
+      taskParameters?: Record<string, unknown>;
       context?: { constraints?: unknown; expectedOutput?: string; additionalInstructions?: string };
     };
+    const safeParams: Record<string, unknown> = taskParameters ?? {};
 
     const jobId = `workflow-${taskType}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     await initializeJob(jobId);
@@ -58,7 +63,7 @@ export const workflowOrchestratorTool = createTool({
             status: 'queued',
             task_type: taskType,
             task_description: taskDescription,
-            task_parameters: taskParameters,
+            task_parameters: safeParams,
             progress: 0,
             created_by: createdBy,
             priority: 'medium',
@@ -93,7 +98,9 @@ export const workflowOrchestratorTool = createTool({
             jobId,
             taskType,
             taskDescription,
-            taskParameters,
+            taskParameters: safeParams,
+            selectedModel: (runtimeContext as { get?: (k: string) => unknown })?.get?.('selectedModel') as string | undefined,
+            modelOptions: (runtimeContext as { get?: (k: string) => unknown })?.get?.('modelOptions') as Record<string, unknown> | undefined,
             context: taskContext as { priority?: 'low'|'medium'|'high'; constraints?: Record<string, unknown>; expectedOutput?: string; additionalInstructions?: string } | undefined,
           },
           runtimeContext,
@@ -136,4 +143,3 @@ export const workflowOrchestratorTool = createTool({
 });
 
 export default workflowOrchestratorTool;
-

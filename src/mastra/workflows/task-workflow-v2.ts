@@ -23,6 +23,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
     taskType: TaskTypeEnum,
     taskDescription: z.string(),
     taskParameters: z.record(z.unknown()),
+    selectedModel: z.string().optional(),
+    modelOptions: z.record(z.unknown()).optional(),
     context: z.object({
       priority: z.enum(['low', 'medium', 'high']).optional(),
       constraints: z.record(z.unknown()).optional(),
@@ -56,7 +58,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       execute: async ({ inputData, runtimeContext }) => {
         const jobId = inputData.jobId;
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
-        const selectedModel = (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const selectedModel = (inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const modelOptions = (inputData as any).modelOptions ?? (rc.get?.('modelOptions') as Record<string, unknown> | undefined);
         // メモリ共有: すべてのエージェントに同一thread/resourceを使わせるため、必要ならthreadId=jobIdに設定
         try {
           const thread = rc.get?.('threadId') as string | undefined;
@@ -81,7 +84,11 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
         const systemContext = extractSystemContext(rc);
         
         // CEOエージェント（選択モデル）
-        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined });
+        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined, modelOptions });
+        try {
+          const info = (ceo as unknown as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
+          if (info) console.log(`[WF] CEO model: ${info.displayName} (${info.provider} - ${info.modelId})`);
+        } catch {}
 
         // ポリシーJSONを生成
         const { text } = await ceo.generate([
@@ -178,7 +185,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       execute: async ({ inputData, runtimeContext }) => {
         const jobId = inputData.jobId;
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
-        const selectedModel = (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const selectedModel = (inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const modelOptions = (inputData as any).modelOptions ?? (rc.get?.('modelOptions') as Record<string, unknown> | undefined);
         try {
           const thread = rc.get?.('threadId') as string | undefined;
           const resource = rc.get?.('resourceId') as string | undefined;
@@ -204,7 +212,11 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
 
         if (directives.hasPending) {
           const systemContext = extractSystemContext(rc);
-          const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined });
+          const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined, modelOptions });
+          try {
+            const info = (ceo as unknown as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
+            if (info) console.log(`[WF] CEO (update) model: ${info.displayName} (${info.provider} - ${info.modelId})`);
+          } catch {}
           const { text } = await ceo.generate([
             {
               role: 'user',
@@ -258,7 +270,11 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
 
         // タスク分解（ManagerがJSON計画を出力）
         const systemContextForManager = extractSystemContext(rc);
-        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext: systemContextForManager || undefined });
+        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext: systemContextForManager || undefined, modelOptions });
+        try {
+          const info = (manager as unknown as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
+          if (info) console.log(`[WF] MANAGER model: ${info.displayName} (${info.provider} - ${info.modelId})`);
+        } catch {}
         const { text: planText } = await manager.generate([
           {
             role: 'user',
@@ -331,7 +347,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       execute: async ({ inputData, runtimeContext }) => {
         const jobId = inputData.jobId;
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
-        const selectedModel = (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const selectedModel = (inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const modelOptions = (inputData as any).modelOptions ?? (rc.get?.('modelOptions') as Record<string, unknown> | undefined);
         try {
           const thread = rc.get?.('threadId') as string | undefined;
           const resource = rc.get?.('resourceId') as string | undefined;
@@ -339,8 +356,14 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           if (!resource) rc.set?.('resourceId', jobId);
         } catch {}
         const systemContext = extractSystemContext(rc);
-        const worker = createRoleAgent({ role: 'WORKER', modelKey: selectedModel, systemContext: systemContext || undefined });
-        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext: systemContext || undefined });
+        const worker = createRoleAgent({ role: 'WORKER', modelKey: selectedModel, systemContext: systemContext || undefined, modelOptions });
+        const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext: systemContext || undefined, modelOptions });
+        try {
+          const wi = (worker as unknown as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
+          const mi = (manager as unknown as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
+          if (wi) console.log(`[WF] WORKER model: ${wi.displayName} (${wi.provider} - ${wi.modelId})`);
+          if (mi) console.log(`[WF] MANAGER model: ${mi.displayName} (${mi.provider} - ${mi.modelId})`);
+        } catch {}
 
         // タスクの総数を取得して進捗管理
         const allTasksResult = await taskManagementTool.execute({ context: { action: 'list_network_tasks', networkId: jobId }, runtimeContext: rc });
@@ -563,7 +586,8 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       execute: async ({ inputData, runtimeContext }) => {
         const jobId = inputData.jobId;
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
-        const selectedModel = (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const selectedModel = (inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const modelOptions = (inputData as any).modelOptions ?? (rc.get?.('modelOptions') as Record<string, unknown> | undefined);
         try {
           const thread = rc.get?.('threadId') as string | undefined;
           const resource = rc.get?.('resourceId') as string | undefined;
@@ -571,7 +595,11 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           if (!resource) rc.set?.('resourceId', jobId);
         } catch {}
         const systemContext = extractSystemContext(rc);
-        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined });
+        const ceo = createRoleAgent({ role: 'CEO', modelKey: selectedModel, systemContext: systemContext || undefined, modelOptions });
+        try {
+          const info = (ceo as unknown as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
+          if (info) console.log(`[WF] CEO (finalize) model: ${info.displayName} (${info.provider} - ${info.modelId})`);
+        } catch {}
 
         // 全小タスクの結果を収集（DBから直接実コンテンツを取得）
         const listRes = await taskManagementTool.execute({ context: { action: 'list_network_tasks', networkId: jobId }, runtimeContext: rc });
@@ -625,4 +653,3 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
   .commit();
 
 export default ceoManagerWorkerWorkflow;
-

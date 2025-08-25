@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     
     console.log("Chat API: User authenticated:", user.id);
 
-    const { message, threadId, model, toolMode } = await req.json();
+    const { message, threadId, model, toolMode, modelOptions } = await req.json();
 
     if (!message) {
       console.log("Chat API: Message is required");
@@ -32,7 +32,11 @@ export async function POST(req: NextRequest) {
     console.log("Chat API: Tool mode:", toolMode || "both");
 
     // Create agent with selected model
-    const agent = createGeneralAgent(model || 'claude-sonnet-4', (toolMode as 'network'|'workflow'|'both') || 'both');
+    const agent = createGeneralAgent(
+      model || 'claude-sonnet-4',
+      (toolMode as 'network'|'workflow'|'both') || 'both',
+      modelOptions as Record<string, unknown> | undefined
+    );
     
     // モデル情報を取得してログ出力
     const modelInfo = (agent as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
@@ -50,6 +54,7 @@ export async function POST(req: NextRequest) {
     // 選択モデルをネットワーク側に伝播
     if (model) runtimeContext.set('selectedModel', model);
     if (toolMode) runtimeContext.set('toolMode', toolMode);
+    if (modelOptions) runtimeContext.set('modelOptions', modelOptions);
     
     // システムコンテキストをRuntimeContextに注入
     injectSystemContext(runtimeContext);
