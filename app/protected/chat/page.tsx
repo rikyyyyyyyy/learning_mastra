@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { DBViewerDialog } from "@/components/db-viewers/db-viewer-dialog";
+import SlideBrowser from "@/components/slide/SlideBrowser";
 
 interface Message {
   id: string;
@@ -984,6 +985,8 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
+            {/* スライドブラウザボタン（モデル選択の横） */}
+            <SlideBrowser />
             
             {/* DBビューアボタン */}
             <button

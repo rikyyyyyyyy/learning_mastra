@@ -6,10 +6,15 @@ import { artifactDAO, contentStoreDAO } from '../db/cas-dao';
 
 // ジョブ結果を保存するディレクトリ
 const JOB_RESULTS_DIR = path.join(process.cwd(), '.job-results');
+const SLIDES_DIR = path.join(process.cwd(), '.generated-slides');
 
 // ディレクトリが存在しない場合は作成
 if (!fs.existsSync(JOB_RESULTS_DIR)) {
   fs.mkdirSync(JOB_RESULTS_DIR, { recursive: true });
+}
+// スライド保存先も作成
+if (!fs.existsSync(SLIDES_DIR)) {
+  fs.mkdirSync(SLIDES_DIR, { recursive: true });
 }
 
 /**
@@ -141,6 +146,18 @@ export const finalResultTool = createTool({
       
       console.log(`✅ 最終成果物を保存しました: ${filePath}`);
       console.log(`📦 アーティファクト参照: ${artifactRef.reference}`);
+
+      // 2.5 スライドタスクの場合、.generated-slides にHTMLを保存してUIから再アクセス可能にする
+      if (taskType === 'slide-generation' && typeof finalResult?.htmlCode === 'string') {
+        try {
+          const safeName = `${networkId}.html`;
+          const slidePath = path.join(SLIDES_DIR, safeName);
+          fs.writeFileSync(slidePath, finalResult.htmlCode, 'utf-8');
+          console.log(`🖼️ スライドHTMLを保存しました: ${slidePath}`);
+        } catch (e) {
+          console.warn('⚠️ スライドHTMLの保存に失敗しました（処理は継続）:', e);
+        }
+      }
       
       // DBにも結果を保存し、ステータス更新
       try {
