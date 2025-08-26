@@ -100,18 +100,12 @@ export function NetworkTaskViewer() {
       const data = await response.json();
       
       if (data.success) {
-        // First, get all main network tasks to extract network info
-        const mainNetworkTasks = data.tasks.filter((t: NetworkTask) => 
-          t.created_by === 'general-agent' && !t.step_number
-        );
-        
-        // Store network info from main tasks
+        // Collect main network tasks (tasks without step_number) to extract network info
+        const mainNetworkTasks = data.tasks.filter((t: NetworkTask) => !t.step_number);
+        // networkInfo reserved for future use
         const networkInfo = new Map<string, { taskType: string, description: string }>();
         mainNetworkTasks.forEach((task: NetworkTask) => {
-          networkInfo.set(task.network_id, {
-            taskType: task.task_type,
-            description: task.task_description
-          });
+          networkInfo.set(task.network_id, { taskType: task.task_type, description: task.task_description });
         });
         
         // Group tasks by network ID
@@ -348,8 +342,8 @@ export function NetworkTaskViewer() {
                       {getNetworkStatusIcon(group.status)}
                       <span className="font-mono text-sm">
                         {(() => {
-                          // Find the main network task created by general-agent
-                          const mainTask = group.tasks.find(t => t.created_by === 'general-agent' && !t.step_number);
+                          // Find the main network task (no step_number)
+                          const mainTask = group.tasks.find(t => !t.step_number);
                           if (mainTask) {
                             // Show the main task's type and description
                             return `${mainTask.task_type.toUpperCase()} - ${mainTask.task_description.substring(0, 50)}${mainTask.task_description.length > 50 ? '...' : ''}`;

@@ -58,7 +58,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       execute: async ({ inputData, runtimeContext }) => {
         const jobId = inputData.jobId;
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
-        const selectedModel = (inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const selectedModel = ((inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
         const modelOptions = (inputData as any).modelOptions ?? (rc.get?.('modelOptions') as Record<string, unknown> | undefined);
         // メモリ共有: すべてのエージェントに同一thread/resourceを使わせるため、必要ならthreadId=jobIdに設定
         try {
@@ -185,7 +185,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       execute: async ({ inputData, runtimeContext }) => {
         const jobId = inputData.jobId;
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
-        const selectedModel = (inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const selectedModel = ((inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
         const modelOptions = (inputData as any).modelOptions ?? (rc.get?.('modelOptions') as Record<string, unknown> | undefined);
         try {
           const thread = rc.get?.('threadId') as string | undefined;
@@ -347,7 +347,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       execute: async ({ inputData, runtimeContext }) => {
         const jobId = inputData.jobId;
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
-        const selectedModel = (inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const selectedModel = ((inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
         const modelOptions = (inputData as any).modelOptions ?? (rc.get?.('modelOptions') as Record<string, unknown> | undefined);
         try {
           const thread = rc.get?.('threadId') as string | undefined;
@@ -365,11 +365,11 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
           if (mi) console.log(`[WF] MANAGER model: ${mi.displayName} (${mi.provider} - ${mi.modelId})`);
         } catch {}
 
-        // タスクの総数を取得して進捗管理
+        // タスクの総数を取得して進捗管理（小タスクのみをカウント）
         const allTasksResult = await taskManagementTool.execute({ context: { action: 'list_network_tasks', networkId: jobId }, runtimeContext: rc });
-        const allTasks = (allTasksResult.tasks as Array<{ taskId: string; status: string }> | undefined) || [];
-        const totalTasks = allTasks.length;
-        console.log(`📋 Total tasks to execute: ${totalTasks}`);
+        const allTasks = (allTasksResult.tasks as Array<{ taskId: string; status: string; stepNumber?: number }> | undefined) || [];
+        const subTaskCount = allTasks.filter(t => typeof t.stepNumber === 'number' && t.stepNumber! > 0).length;
+        console.log(`📋 Total subtasks to execute: ${subTaskCount}`);
         
         let loopCount = 0;
         let completedCount = 0;
@@ -586,7 +586,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       execute: async ({ inputData, runtimeContext }) => {
         const jobId = inputData.jobId;
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
-        const selectedModel = (inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined) || 'claude-sonnet-4';
+        const selectedModel = ((inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
         const modelOptions = (inputData as any).modelOptions ?? (rc.get?.('modelOptions') as Record<string, unknown> | undefined);
         try {
           const thread = rc.get?.('threadId') as string | undefined;

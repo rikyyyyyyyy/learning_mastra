@@ -1,4 +1,6 @@
 import { createClient } from '@libsql/client';
+import fs from 'fs';
+import path from 'path';
 import { SQL_SCHEMAS } from './schema';
 
 interface DBClient {
@@ -90,6 +92,25 @@ let taskDB: TaskManagementDB | null = null;
 
 export async function initializeTaskManagementDB(url: string = ':memory:'): Promise<TaskManagementDB> {
   if (!taskDB) {
+    // In development, if using a file: URL, clear old DB to avoid stale tasks reappearing
+    if (process.env.NODE_ENV !== 'production' && url.startsWith('file:')) {
+      try {
+        const raw = url.slice('file:'.length);
+        const resolved = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+        if (fs.existsSync(resolved)) {
+          console.log(`🧹 Clearing dev task DB at ${resolved}`);
+          fs.unlinkSync(resolved);
+        }
+        // Clean possible SQLite WAL/SHM files
+        const wal = `${resolved}-wal`;
+        const shm = `${resolved}-shm`;
+        if (fs.existsSync(wal)) fs.unlinkSync(wal);
+        if (fs.existsSync(shm)) fs.unlinkSync(shm);
+      } catch (e) {
+        console.warn('⚠️ Failed to wipe dev task DB file:', e);
+      }
+    }
+
     taskDB = new TaskManagementDB(url);
     await taskDB.initialize();
   }

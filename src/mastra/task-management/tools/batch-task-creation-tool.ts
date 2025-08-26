@@ -56,35 +56,38 @@ export const batchTaskCreationTool = createTool({
       }
       const daos = getDAOs();
       
-      // 既存タスクのチェック - 同じネットワークIDで既にタスクが存在する場合はスキップ
+      // 既存タスクのチェック - 同じネットワークIDで既にタスクが存在する場合は重複を避ける
       const existingTasks = await daos.tasks.findByNetworkId(networkId);
       if (existingTasks.length > 0) {
-        console.log(`⚠️ Tasks already exist for network ${networkId}. Found ${existingTasks.length} existing tasks.`);
-        
-        // 既存タスクのステップ番号を取得
-        const existingSteps = new Set(existingTasks.map(t => t.step_number).filter(s => s !== undefined && s !== null));
-        
-        // 新しいタスクから既存のステップ番号を除外
-        const newTasks = tasks.filter(t => !existingSteps.has(t.stepNumber));
-        
-        if (newTasks.length === 0) {
-          console.log(`ℹ️ All tasks already exist for network ${networkId}. Skipping creation.`);
+        // ステップ番号重複を避ける（null はメインタスクなので除外して保持）
+        const existingSteps = new Set<number>(
+          existingTasks
+            .map(t => t.step_number)
+            .filter((s): s is number => typeof s === 'number')
+        );
+
+        // 既存と重複する stepNumber を除外
+        const filtered = tasks.filter(t => {
+          const sn = t.stepNumber;
+          if (typeof sn === 'number' && existingSteps.has(sn)) return false;
+          return true;
+        });
+
+        if (filtered.length === 0) {
+          console.log(`ℹ️ All tasks already exist or conflict for network ${networkId}. Skipping creation.`);
           return {
             success: true,
-            createdTasks: existingTasks.map(t => ({
-              taskId: t.task_id,
-              taskType: t.task_type,
-              stepNumber: t.step_number,
-            })),
+            createdTasks: existingTasks
+              .filter(t => typeof t.step_number === 'number')
+              .map(t => ({ taskId: t.task_id, taskType: t.task_type, stepNumber: t.step_number })),
             networkId,
-            totalTasks: existingTasks.length,
-            message: `Using existing ${existingTasks.length} tasks for network ${networkId}`,
+            totalTasks: existingTasks.filter(t => typeof t.step_number === 'number').length,
+            message: `Using existing tasks for network ${networkId}`,
           };
         }
-        
-        console.log(`📝 Creating ${newTasks.length} new tasks (${tasks.length - newTasks.length} already exist)`);
-        // 新しいタスクのみを処理対象とする
-        tasks.splice(0, tasks.length, ...newTasks);
+
+        console.log(`📝 Creating ${filtered.length} new tasks (${tasks.length - filtered.length} skipped for duplication/conflict)`);
+        tasks.splice(0, tasks.length, ...filtered);
       }
       
       // Ensure response time < 100ms by using setTimeout for actual creation
@@ -128,12 +131,20 @@ export const batchTaskCreationTool = createTool({
       
       // 同期で作成（ワークフロー/ネットワークが直後に利用できるようにする）
       const results = await Promise.all(
-        taskDataList.map(taskData =>
-          daos.tasks.create(taskData).catch(err => {
+        taskDataList.map(async (taskData) => {
+          try {
+            return await daos.tasks.create(taskData);
+          } catch (err) {
+            // ユニーク制約違反（同一network_id+step_number）は黙ってスキップ
+            const msg = (err as Error)?.message || '';
+            if (msg.toLowerCase().includes('unique') || msg.toLowerCase().includes('constraint')) {
+              console.warn(`Skip duplicate step ${taskData.step_number} for network ${networkId}`);
+              return null;
+            }
             console.error(`Failed to create task ${taskData.task_id}:`, err);
             return null;
-          })
-        )
+          }
+        })
       );
 
       const successCount = results.filter(r => r !== null).length;
