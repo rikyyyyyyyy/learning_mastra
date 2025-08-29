@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { RuntimeContext } from "@mastra/core/di";
 import { createGeneralAgent } from "@/src/mastra/agents/general-agent";
-import { injectSystemContext } from "@/src/mastra/utils/shared-context";
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,7 +18,7 @@ export async function POST(req: NextRequest) {
     
     console.log("Chat API: User authenticated:", user.id);
 
-    const { message, threadId, model, toolMode, modelOptions } = await req.json();
+    const { message, threadId, model, toolMode } = await req.json();
 
     if (!message) {
       console.log("Chat API: Message is required");
@@ -32,11 +31,7 @@ export async function POST(req: NextRequest) {
     console.log("Chat API: Tool mode:", toolMode || "both");
 
     // Create agent with selected model
-    const agent = createGeneralAgent(
-      model || 'claude-sonnet-4',
-      (toolMode as 'network'|'workflow'|'both') || 'both',
-      modelOptions as Record<string, unknown> | undefined
-    );
+    const agent = createGeneralAgent(model || 'claude-sonnet-4', (toolMode as 'network'|'workflow'|'both') || 'both');
     
     // モデル情報を取得してログ出力
     const modelInfo = (agent as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
@@ -50,21 +45,20 @@ export async function POST(req: NextRequest) {
     // RuntimeContextを作成してresourceIdとthreadIdを設定
     const runtimeContext = new RuntimeContext();
     runtimeContext.set('resourceId', user.id);
-    runtimeContext.set('threadId', threadId || `thread-${Date.now()}`);
+    const baseThreadId = threadId || `thread-${Date.now()}`;
+    // モデルごとにスレッドをセグメント（Responsesのprevious_response_id不整合を防止）
+    const effectiveThreadId = modelInfo?.modelId ? `${baseThreadId}__${modelInfo.modelId}` : baseThreadId;
+    runtimeContext.set('threadId', effectiveThreadId);
     // 選択モデルをネットワーク側に伝播
     if (model) runtimeContext.set('selectedModel', model);
     if (toolMode) runtimeContext.set('toolMode', toolMode);
-    if (modelOptions) runtimeContext.set('modelOptions', modelOptions);
     
-    // システムコンテキストをRuntimeContextに注入
-    injectSystemContext(runtimeContext);
-    
-    console.log("Chat API: RuntimeContext created with resourceId:", user.id, "threadId:", threadId || `thread-${Date.now()}`);
+    console.log("Chat API: RuntimeContext created with resourceId:", user.id, "threadId:", effectiveThreadId);
 
     // Use stream() with memory parameters and runtime context
     const stream = await agent.stream(message, {
       memory: {
-        thread: threadId || `thread-${Date.now()}`, // デフォルトのthreadIdを生成
+        thread: effectiveThreadId, // モデル込みのスレッドID
         resource: user.id, // ユーザーIDをresourceIdとして使用
       },
       runtimeContext, // RuntimeContextを追加
@@ -93,6 +87,17 @@ export async function POST(req: NextRequest) {
           
           // ストリーム全体を処理
           for await (const chunk of stream.fullStream) {
+            // 推論モデルのreasoning要約イベントを中継
+            if ((chunk as { type?: string }).type === 'reasoning') {
+              // AI SDK v5のpartは textDelta / text どちらか
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const textDelta = (chunk as any).textDelta ?? (chunk as any).text ?? '';
+              const event = JSON.stringify({
+                type: 'reasoning',
+                content: textDelta,
+              }) + '\n';
+              controller.enqueue(encoder.encode(event));
+            }
             // テキストチャンクの場合（v5: text プロパティ）
             if (chunk.type === 'text-delta') {
               const delta = (chunk as unknown as { text?: string }).text ?? '';
