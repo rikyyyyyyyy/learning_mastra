@@ -3,6 +3,7 @@ import { sharedMemory } from '../../shared-memory';
 import { exaMCPSearchTool } from '../../tools/exa-search-wrapper';
 import { docsReaderTool } from '../../tools/docs-reader-tool';
 import { getAgentPrompt } from '../../prompts/agent-prompts';
+import { taskManagementTool } from '../../task-management/tools/task-management-tool';
 import { getSystemContext, SystemContext } from '../../utils/shared-context';
 import { resolveModel } from '../../config/model-registry';
 
@@ -20,6 +21,7 @@ export function createWorkerAgent(modelType: string = 'claude-sonnet-4', systemC
     tools: { 
       exaMCPSearchTool,
       docsReaderTool,
+      taskManagementTool,
       // Additional tools can be added here as the system grows
     },
     memory: sharedMemory,

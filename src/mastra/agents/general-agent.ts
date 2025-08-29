@@ -2,13 +2,20 @@ import { Agent } from '@mastra/core/agent';
 import { sharedMemory } from '../shared-memory';
 import { getToolsForRole } from '../config/tool-registry';
 import { getAgentPrompt } from '../prompts/agent-prompts';
-import { resolveModel } from '../config/model-registry';
+import { resolveModel, resolveModelWithOptions } from '../config/model-registry';
 import { getSystemContext } from '../utils/shared-context';
 
 // モデルを動的に作成する関数
 // toolMode: 'network' | 'workflow' | 'both'
-export function createGeneralAgent(modelType: string = 'claude-sonnet-4', toolMode: 'network' | 'workflow' | 'both' = 'both'): Agent {
-  const { aiModel, info: modelInfo } = resolveModel(modelType);
+// modelOptions: OpenAIモデル向けの追加パラメータ（reasoning等）
+export function createGeneralAgent(
+  modelType: string = 'claude-sonnet-4',
+  toolMode: 'network' | 'workflow' | 'both' = 'both',
+  modelOptions?: Record<string, unknown>
+): Agent {
+  const { aiModel, info: modelInfo } = modelOptions
+    ? resolveModelWithOptions(modelType, modelOptions)
+    : resolveModel(modelType);
   
   console.log(`🤖 AIモデル設定: ${modelInfo.displayName} (${modelInfo.provider} - ${modelInfo.modelId})`);
   

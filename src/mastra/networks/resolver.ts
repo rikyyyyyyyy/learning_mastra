@@ -7,6 +7,7 @@ import { resolveModel } from '../config/model-registry';
 export async function resolveNetworkFromDB(options: {
   networkId?: string; // 指定が無ければ enabled の最新を取得
   memory?: unknown;
+  modelOptions?: Record<string, unknown>;
 }): Promise<{
   network: ReturnType<typeof buildNetwork>;
   agentMap: Record<string, ReturnType<typeof createAgentFromDefinition>>;
@@ -24,7 +25,10 @@ export async function resolveNetworkFromDB(options: {
 
   // ネットワークモデルは、デフォルト：最初のエージェントの model_key（無ければ既定）
   const primaryModelKey = selected[0].model_key;
-  const { aiModel, info } = resolveModel(primaryModelKey);
+  const { resolveModelWithOptions } = await import('../config/model-registry');
+  const { aiModel, info } = options.modelOptions
+    ? resolveModelWithOptions(primaryModelKey, options.modelOptions)
+    : resolveModel(primaryModelKey);
 
   // エージェント生成
   const agentMap: Record<string, ReturnType<typeof createAgentFromDefinition>> = {};
@@ -37,7 +41,7 @@ export async function resolveNetworkFromDB(options: {
       promptText: agentDef.prompt_text,
       tools: agentDef.tools,
       memory: options.memory,
-    });
+    }, options.modelOptions);
     agentMap[agentDef.id] = agent as any;
   }
 
@@ -51,8 +55,20 @@ export async function resolveNetworkFromDB(options: {
   const instructions = `
 ## エージェントネットワーク実行フロー
 
-このネットワークは複数エージェントが並列的な役割分担で協働します。
-ルーティングは各エージェントの役割と追加指令に基づいて決まります。
+CEO-Manager-Worker が厳密なルーティング契約に従って協働します。
+ルーティングはToolのエラーコードによって強制され、誤順序時は自動で適切な役割に戻ります。
+
+【Routing Contract（重要）】
+- stage: initialized → policy_set → planning → executing → finalizing → completed
+- エラーコード:
+  - POLICY_NOT_SET → CEOによるsave_policy
+  - INVALID_STAGE → stageに適合する操作のみ実施
+  - TASK_NOT_FOUND/TASK_NOT_QUEUED → 小タスク定義・状態の修正
+  - RESULT_PARTIAL_CONTINUE_REQUIRED → 同一Workerが継続生成
+  - SUBTASKS_INCOMPLETE → 最終保存を行わず完了待機
+
+【指示】
+- 全ツール入力はJSON辞書のみ。エラーは再試行せずエージェントを切り替えること。
 `;
 
   const network = buildNetwork({
@@ -67,4 +83,3 @@ export async function resolveNetworkFromDB(options: {
 
   return { network, agentMap, modelInfo: info };
 }
-

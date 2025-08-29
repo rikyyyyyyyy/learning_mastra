@@ -3,13 +3,19 @@ import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
 import { artifactDAO, contentStoreDAO } from '../db/cas-dao';
+import { ensureRole, requireStage, allSubtasksCompleted, setNetworkStage, ERROR_CODES } from './routing-validators';
 
 // ジョブ結果を保存するディレクトリ
 const JOB_RESULTS_DIR = path.join(process.cwd(), '.job-results');
+const SLIDES_DIR = path.join(process.cwd(), '.generated-slides');
 
 // ディレクトリが存在しない場合は作成
 if (!fs.existsSync(JOB_RESULTS_DIR)) {
   fs.mkdirSync(JOB_RESULTS_DIR, { recursive: true });
+}
+// スライド保存先も作成
+if (!fs.existsSync(SLIDES_DIR)) {
+  fs.mkdirSync(SLIDES_DIR, { recursive: true });
 }
 
 /**
@@ -61,11 +67,28 @@ export const finalResultTool = createTool({
     success: z.boolean(),
     message: z.string(),
     savedPath: z.string().optional(),
+    errorCode: z.string().optional(),
   }),
   execute: async ({ context, runtimeContext }) => {
     const { networkId, taskType, finalResult, metadata } = context;
     
     try {
+      // CEO専用（runtimeContext.agentRoleがあれば検証）
+      const roleCheck = ensureRole(runtimeContext, ['CEO']);
+      if (!roleCheck.success) {
+        return { success: false, message: (roleCheck as any).message, errorCode: ERROR_CODES.ROLE_FORBIDDEN };
+      }
+      // ステージ検証（executingでも全完了なら自動でfinalizingへ昇格）
+      const st = await requireStage(networkId, ['executing', 'finalizing']);
+      if (!st.success) {
+        return { success: false, message: (st as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
+      }
+      const ready = await allSubtasksCompleted(networkId);
+      if (!ready.success) {
+        return { success: false, message: (ready as any).message, errorCode: ERROR_CODES.SUBTASKS_INCOMPLETE };
+      }
+      // executing なら finalizing に昇格
+      try { await setNetworkStage(networkId, 'finalizing'); } catch {}
       // 1. アーティファクトとして最終成果物を保存
       let artifactRef = null;
       let mimeType = 'text/plain';
@@ -141,6 +164,18 @@ export const finalResultTool = createTool({
       
       console.log(`✅ 最終成果物を保存しました: ${filePath}`);
       console.log(`📦 アーティファクト参照: ${artifactRef.reference}`);
+
+      // 2.5 スライドタスクの場合、.generated-slides にHTMLを保存してUIから再アクセス可能にする
+      if (taskType === 'slide-generation' && typeof finalResult?.htmlCode === 'string') {
+        try {
+          const safeName = `${networkId}.html`;
+          const slidePath = path.join(SLIDES_DIR, safeName);
+          fs.writeFileSync(slidePath, finalResult.htmlCode, 'utf-8');
+          console.log(`🖼️ スライドHTMLを保存しました: ${slidePath}`);
+        } catch (e) {
+          console.warn('⚠️ スライドHTMLの保存に失敗しました（処理は継続）:', e);
+        }
+      }
       
       // DBにも結果を保存し、ステータス更新
       try {
@@ -151,6 +186,9 @@ export const finalResultTool = createTool({
         console.warn('⚠️ ジョブステータスの更新に失敗（処理は継続）:', error);
       }
       
+      // ステージ完了
+      try { await setNetworkStage(networkId, 'completed'); } catch {}
+
       return {
         success: true,
         message: `Successfully saved final result for network ${networkId}`,
@@ -169,10 +207,7 @@ export const finalResultTool = createTool({
         console.warn('⚠️ エラーステータスの更新に失敗:', statusError);
       }
       
-      return {
-        success: false,
-        message: `Failed to save final result: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      };
+      return { success: false, message: `Failed to save final result: ${error instanceof Error ? error.message : 'Unknown error'}` };
     }
   },
 });

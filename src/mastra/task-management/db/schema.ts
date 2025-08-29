@@ -132,6 +132,9 @@ export const SQL_SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_network_tasks_created_by ON network_tasks(created_by);
     CREATE INDEX IF NOT EXISTS idx_network_tasks_assigned_to ON network_tasks(assigned_to);
     CREATE INDEX IF NOT EXISTS idx_network_tasks_step_number ON network_tasks(network_id, step_number);
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_network_tasks_network_step
+      ON network_tasks(network_id, step_number)
+      WHERE step_number IS NOT NULL;
   `,
   
   network_directives: `

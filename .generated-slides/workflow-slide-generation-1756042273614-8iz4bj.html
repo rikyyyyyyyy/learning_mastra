@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>猫について学ぼう - 包括的なプレゼンテーション</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      height: 100vh;
+      overflow: hidden;
+      color: #333;
+    }
+
+    .slide-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    .slide {
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      height: 100%;
+      padding: 40px;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+    }
+
+    .slide.active {
+      display: flex;
+      animation: fadeIn 0.5s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    h1 {
+      font-size: 3.5rem;
+      color: #2c3e50;
+      margin-bottom: 30px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+    }
+
+    h2 {
+      font-size: 2.5rem;
+      color: #34495e;
+      margin: 25px 0 20px;
+    }
+
+    h3 {
+      font-size: 1.8rem;
+      color: #e74c3c;
+      margin: 15px 0 10px;
+    }
+
+    p {
+      font-size: 1.3rem;
+      line-height: 1.8;
+      margin: 10px 0;
+      color: #2c3e50;
+    }
+
+    .title-slide {
+      background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
+    }
+
+    .title-slide h1 {
+      font-size: 4.5rem;
+      color: #fff;
+      text-shadow: 3px 3px 6px rgba(0,0,0,0.3);
+      margin-bottom: 40px;
+    }
+
+    .title-slide .subtitle {
+      font-size: 2rem;
+      color: #fff;
+      margin-bottom: 30px;
+      opacity: 0.9;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 25px;
+      width: 100%;
+      max-width: 1200px;
+      margin-top: 30px;
+    }
+
+    .feature-card {
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 15px;
+      padding: 25px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.18);
+      transition: transform 0.3s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-5px);
+    }
+
+    .breed-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 30px;
+      width: 100%;
+      max-width: 1000px;
+      margin-top: 30px;
+    }
+
+    .breed-card {
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 15px;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    }
+
+    .behavior-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 30px;
+      width: 100%;
+      max-width: 900px;
+      margin-top: 30px;
+    }
+
+    .behavior-card {
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 15px;
+      padding: 25px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    }
+
+    .health-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 25px;
+      width: 100%;
+      max-width: 1000px;
+      margin-top: 30px;
+    }
+
+    .health-item {
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 15px;
+      padding: 20px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    }
+
+    .care-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 25px;
+      width: 100%;
+      max-width: 1100px;
+      margin-top: 30px;
+    }
+
+    .care-card {
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 15px;
+      padding: 25px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    }
+
+    .highlight-box {
+      background: linear-gradient(135deg, #ffeaa7 0%, #fab1a0 100%);
+      border-radius: 15px;
+      padding: 25px;
+      margin: 20px 0;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    }
+
+    .tip-box {
+      background: rgba(52, 152, 219, 0.1);
+      border-left: 5px solid #3498db;
+      border-radius: 10px;
+      padding: 20px;
+      margin: 20px 0;
+      text-align: left;
+    }
+
+    .tip-box h3 {
+      color: #3498db;
+      margin-bottom: 15px;
+    }
+
+    ul {
+      text-align: left;
+      margin: 15px 0;
+      padding-left: 20px;
+    }
+
+    li {
+      font-size: 1.2rem;
+      line-height: 1.6;
+      margin: 8px 0;
+      color: #2c3e50;
+    }
+
+    .navigation {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 15px;
+      z-index: 1000;
+    }
+
+    .nav-btn {
+      background: rgba(52, 152, 219, 0.9);
+      color: white;
+      border: none;
+      padding: 15px 25px;
+      border-radius: 50px;
+      cursor: pointer;
+      font-size: 1.1rem;
+      font-weight: bold;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(52, 152, 219, 0.4);
+    }
+
+    .nav-btn:hover {
+      background: rgba(52, 152, 219, 1);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(52, 152, 219, 0.6);
+    }
+
+    .nav-btn:disabled {
+      background: rgba(149, 165, 166, 0.5);
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .slide-indicator {
+      position: fixed;
+      top: 30px;
+      right: 30px;
+      display: flex;
+      gap: 8px;
+      z-index: 1000;
+    }
+
+    .slide-counter {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.3);
+      transition: all 0.3s ease;
+    }
+
+    .slide-counter.active {
+      background: rgba(52, 152, 219, 0.9);
+      transform: scale(1.2);
+    }
+
+    .emoji {
+      font-size: 3rem;
+      margin-bottom: 15px;
+      display: block;
+    }
+
+    .stats-box {
+      display: flex;
+      justify-content: space-around;
+      margin: 30px 0;
+      flex-wrap: wrap;
+    }
+
+    .stat-item {
+      text-align: center;
+      margin: 10px;
+    }
+
+    .stat-number {
+      font-size: 2.5rem;
+      font-weight: bold;
+      color: #e74c3c;
+      display: block;
+    }
+
+    .stat-label {
+      font-size: 1.1rem;
+      color: #7f8c8d;
+      margin-top: 5px;
+    }
+
+    @media (max-width: 768px) {
+      .slide {
+        padding: 20px;
+      }
+      
+      h1 {
+        font-size: 2.5rem;
+      }
+      
+      h2 {
+        font-size: 2rem;
+      }
+      
+      .feature-grid, .breed-grid, .behavior-grid, .health-grid, .care-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .navigation {
+        bottom: 20px;
+      }
+      
+      .nav-btn {
+        padding: 12px 20px;
+        font-size: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <!-- スライド1: タイトル -->
+    <div class="slide active title-slide">
+      <h1>🐱 猫について学ぼう</h1>
+      <p class="subtitle">包括的なプレゼンテーション</p>
+      <div class="highlight-box">
+        <p><strong>猫の基本情報から飼い方まで</strong></p>
+        <p>愛らしい猫たちの世界を詳しく探求</p>
+      </div>
+    </div>
+
+    <!-- スライド2: 猫の基本情報 -->
+    <div class="slide">
+      <h1>🔍 猫の基本情報</h1>
+      
+      <div class="feature-grid">
+        <div class="feature-card">
+          <span class="emoji">🧬</span>
+          <h3>学名と分類</h3>
+          <p><strong>学名:</strong> Felis silvestris catus</p>
+          <p><strong>科:</strong> ネコ科（Felidae）</p>
+          <p><strong>属:</strong> ネコ属（Felis）</p>
+        </div>
+        
+        <div class="feature-card">
+          <span class="emoji">📏</span>
+          <h3>身体的特徴</h3>
+          <p><strong>体重:</strong> 3-7kg（品種により差異）</p>
+          <p><strong>体長:</strong> 30-50cm</p>
+          <p><strong>特徴:</strong> 柔軟な脊椎、鋭い爪</p>
+        </div>
+        
+        <div class="feature-card">
+          <span class="emoji">⏰</span>
+          <h3>寿命と成長</h3>
+          <p><strong>平均寿命:</strong> 12-18年</p>
+          <p><strong>成猫:</strong> 1歳頃</p>
+          <p><strong>シニア期:</strong> 7歳以降</p>
+        </div>
+        
+        <div class="feature-card">
+          <span class="emoji">👁️</span>
+          <h3>感覚器官</h3>
+          <p><strong>視覚:</strong> 暗視能力に優れる</p>
+          <p><strong>聴覚:</strong> 人間の3倍の音域</p>
+          <p><strong>嗅覚:</strong> 人間の14倍の嗅覚</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- スライド3: 人気の猫品種 -->
+    <div class="slide">
+      <h1>🏆 人気の猫品種</h1>
+      
+      <div class="breed-grid">
+        <div class="breed-card">
+          <span class="emoji">🇯🇵</span>
+          <h3>日本猫</h3>
+          <p><strong>特徴:</strong> 短毛、三毛・キジトラ</p>
+          <p><strong>性格:</strong> 独立心旺盛、賢い</p>
+          <p><strong>サイズ:</strong> 中型（3-5kg）</p>
+        </div>
+        
+        <div class="breed-card">
+          <span class="emoji">🦁</span>
+          <h3>ペルシャ</h3>
+          <p><strong>特徴:</strong> 長毛、平たい顔</p>
+          <p><strong>性格:</strong> 穏やか、甘えん坊</p>
+          <p><strong>サイズ:</strong> 大型（4-7kg）</p>
+        </div>
+        
+        <div class="breed-card">
+          <span class="emoji">🇺🇸</span>
+          <h3>アメリカンショートヘア</h3>
+          <p><strong>特徴:</strong> 短毛、シルバータビー</p>
+          <p><strong>性格:</strong> 社交的、活発</p>
+          <p><strong>サイズ:</strong> 中～大型（3-6kg）</p>
+        </div>
+      </div>
+      
+      <div class="tip-box">
+        <h3>💡 品種選びのポイント</h3>
+        <ul>
+          <li><strong>住環境:</strong> アパート向けは穏やかな品種</li>
+          <li><strong>お手入れ:</strong> 長毛種は毎日のブラッシング必須</li>
+          <li><strong>性格:</strong> 家族構成に合った性格の品種を選択</li>
+          <li><strong>健康面:</strong> 品種特有の病気について事前に学習</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- スライド4: 猫の行動と習性 -->
+    <div class="slide">
+      <h1>🎭 猫の行動と習性</h1>
+      
+      <div class="behavior-grid">

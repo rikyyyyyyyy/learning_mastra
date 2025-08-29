@@ -245,7 +245,8 @@ export class NetworkTaskDAO extends BaseDAO {
     const query = `
       DELETE FROM network_tasks
       WHERE network_id = ?
-        AND (step_number IS NULL OR step_number >= ?)
+        AND step_number IS NOT NULL
+        AND step_number >= ?
         AND status != 'completed'
     `;
     await this.executeRun(query, [networkId, fromStepNumber]);

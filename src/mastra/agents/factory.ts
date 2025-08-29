@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent';
 import { sharedMemory } from '../shared-memory';
 import { getAgentPrompt } from '../prompts/agent-prompts';
-import { resolveModel, AnyModel } from '../config/model-registry';
+import { resolveModel, AnyModel, resolveModelWithOptions } from '../config/model-registry';
 import { getToolsForRole } from '../config/tool-registry';
 import { SystemContext } from '../utils/shared-context';
 
@@ -12,11 +12,14 @@ export interface AgentFactoryOptions {
   modelKey?: string;
   memory?: unknown; // NewAgentNetworkがDynamicArgumentを要求する環境もあるためunknownで受ける
   systemContext?: SystemContext; // システムコンテキストをオプションで追加
+  modelOptions?: Record<string, unknown>; // OpenAI向けモデルオプション（reasoning等）
 }
 
 export function createRoleAgent(options: AgentFactoryOptions): Agent {
-  const { role, modelKey, memory, systemContext } = options;
-  const { aiModel, info } = resolveModel(modelKey);
+  const { role, modelKey, memory, systemContext, modelOptions } = options;
+  const { aiModel, info } = modelOptions
+    ? resolveModelWithOptions(modelKey, modelOptions)
+    : resolveModel(modelKey);
 
   const nameMap: Record<RoleId, string> = {
     GENERAL: 'General AI Assistant',
@@ -50,8 +53,10 @@ export interface AgentDefinitionInput {
   systemContext?: SystemContext; // システムコンテキストをオプションで追加
 }
 
-export function createAgentFromDefinition(def: AgentDefinitionInput): Agent {
-  const { aiModel, info } = resolveModel(def.modelKey);
+export function createAgentFromDefinition(def: AgentDefinitionInput, modelOptions?: Record<string, unknown>): Agent {
+  const { aiModel, info } = modelOptions
+    ? resolveModelWithOptions(def.modelKey, modelOptions)
+    : resolveModel(def.modelKey);
 
   const instructions = def.promptText ?? getAgentPrompt(def.role, def.systemContext);
 
@@ -81,4 +86,3 @@ export function createAgentFromDefinition(def: AgentDefinitionInput): Agent {
   (agent as { _modelInfo?: { provider: string; modelId: string; displayName: string } })._modelInfo = info;
   return agent;
 }
-

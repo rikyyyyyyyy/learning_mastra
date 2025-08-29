@@ -1,6 +1,14 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { getDAOs } from '../db/dao';
+import {
+  ERROR_CODES,
+  requireStage,
+  setNetworkStage,
+  ok,
+  fail,
+  ensureRole,
+} from './routing-validators';
 
 /**
  * CEOエージェント専用ツール
@@ -32,12 +40,19 @@ export const policyManagementTool = createTool({
     action: z.string(),
     networkId: z.string(),
     message: z.string(),
+    errorCode: z.string().optional(),
   }),
   execute: async ({ context, runtimeContext }) => {
     const { action, networkId, policy } = context;
     
     try {
       const daos = getDAOs();
+
+      // CEOロールのみ（runtimeContextにroleがあれば検証）
+      const roleCheck = ensureRole(runtimeContext, ['CEO']);
+      if (!roleCheck.success) {
+        return { success: false, action, networkId, message: (roleCheck as any).message, errorCode: ERROR_CODES.ROLE_FORBIDDEN };
+      }
 
       // networkId 一貫性チェック: runtimeContext.currentJobId が存在すれば照合
       try {
@@ -48,6 +63,7 @@ export const policyManagementTool = createTool({
             action,
             networkId,
             message: `Network ID mismatch. expected=${currentJobId} received=${networkId}`,
+            errorCode: ERROR_CODES.NETWORK_ID_MISMATCH,
           };
         }
       } catch {
@@ -59,14 +75,22 @@ export const policyManagementTool = createTool({
       
       if (!mainTask) {
         // メインタスクが存在しない場合はエラー
-        return {
-          success: false,
-          action,
-          networkId,
-          message: `Network main task ${networkId} not found. Cannot save policy.`,
-        };
+        return { success: false, action, networkId, message: `Network main task ${networkId} not found. Cannot save policy.`, errorCode: ERROR_CODES.TASK_NOT_FOUND };
       }
       
+      // ステージ検証
+      if (action === 'save_policy') {
+        const st = await requireStage(networkId, ['initialized', 'policy_set']);
+        if (!st.success) {
+          return { success: false, action, networkId, message: (st as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
+        }
+      } else if (action === 'update_policy') {
+        const st = await requireStage(networkId, ['policy_set', 'planning', 'executing']);
+        if (!st.success) {
+          return { success: false, action, networkId, message: (st as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
+        }
+      }
+
       // 現在のメタデータを取得
       const currentMetadata = mainTask.metadata || {};
       
@@ -84,6 +108,11 @@ export const policyManagementTool = createTool({
       
       // メインタスクのメタデータを更新
       await daos.tasks.updateMetadata(networkId, updatedMetadata);
+
+      // ステージ更新
+      if (action === 'save_policy') {
+        await setNetworkStage(networkId, 'policy_set');
+      }
       
       console.log(`✅ ネットワーク方針を${action === 'save_policy' ? '保存' : '更新'}しました:`, {
         networkId,
@@ -91,20 +120,10 @@ export const policyManagementTool = createTool({
         policyVersion: updatedMetadata.policy.version,
       });
       
-      return {
-        success: true,
-        action,
-        networkId,
-        message: `Policy ${action === 'save_policy' ? 'saved' : 'updated'} successfully for network ${networkId}`,
-      };
+      return { success: true, action, networkId, message: `Policy ${action === 'save_policy' ? 'saved' : 'updated'} successfully for network ${networkId}` };
     } catch (error) {
       console.error('❌ 方針管理エラー:', error);
-      return {
-        success: false,
-        action,
-        networkId,
-        message: `Failed to ${action}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      };
+      return { success: false, action, networkId, message: `Failed to ${action}: ${error instanceof Error ? error.message : 'Unknown error'}` };
     }
   },
 });
@@ -122,6 +141,7 @@ export const policyCheckTool = createTool({
     hasPolicySet: z.boolean(),
     policy: z.any().optional(),
     message: z.string(),
+    stage: z.string().optional(),
   }),
   execute: async ({ context }) => {
     const { networkId } = context;
@@ -136,22 +156,26 @@ export const policyCheckTool = createTool({
         return {
           hasPolicySet: false,
           message: `Network ${networkId} not found`,
+          stage: 'initialized',
         };
       }
       
       // メタデータから方針を確認
       const policy = mainTask.metadata?.policy;
+      const stage = (mainTask.metadata as any)?.stage || 'initialized';
       
       if (policy) {
         return {
           hasPolicySet: true,
           policy: policy,
           message: `Policy found for network ${networkId} (version ${policy.version})`,
+          stage,
         };
       } else {
         return {
           hasPolicySet: false,
           message: `No policy set for network ${networkId}. CEO decision required.`,
+          stage,
         };
       }
     } catch (error) {
@@ -159,6 +183,7 @@ export const policyCheckTool = createTool({
       return {
         hasPolicySet: false,
         message: `Error checking policy: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        stage: 'initialized',
       };
     }
   },

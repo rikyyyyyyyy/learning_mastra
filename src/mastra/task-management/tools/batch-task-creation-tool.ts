@@ -1,6 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { getDAOs } from '../db/dao';
+import { requirePolicy, requireStage, setNetworkStage, ERROR_CODES } from './routing-validators';
 // import { NetworkTask } from '../db/schema';
 
 // バッチタスク作成ツール - Manager用の一括タスク作成
@@ -31,6 +32,7 @@ export const batchTaskCreationTool = createTool({
     networkId: z.string(),
     totalTasks: z.number(),
     message: z.string(),
+    errorCode: z.string().optional(),
     error: z.string().optional(),
   }),
   execute: async ({ context, runtimeContext }) => {
@@ -49,42 +51,71 @@ export const batchTaskCreationTool = createTool({
             networkId,
             totalTasks: 0,
             message: `Network ID mismatch. expected=${currentJobId} received=${networkId}`,
+            errorCode: ERROR_CODES.NETWORK_ID_MISMATCH,
           };
         }
       } catch {
         // 取得失敗時はスキップ（後方互換）
       }
+
+      // Policy required
+      const policyCheck = await requirePolicy(networkId);
+      if (!policyCheck.success) {
+        return {
+          success: false,
+          createdTasks: [],
+          networkId,
+          totalTasks: 0,
+          message: (policyCheck as any).message,
+          errorCode: ERROR_CODES.POLICY_NOT_SET,
+        };
+      }
+      // Stage must be policy_set or planning
+      const stageCheck = await requireStage(networkId, ['policy_set', 'planning']);
+      if (!stageCheck.success) {
+        return {
+          success: false,
+          createdTasks: [],
+          networkId,
+          totalTasks: 0,
+          message: (stageCheck as any).message,
+          errorCode: ERROR_CODES.INVALID_STAGE,
+        };
+      }
       const daos = getDAOs();
       
-      // 既存タスクのチェック - 同じネットワークIDで既にタスクが存在する場合はスキップ
+      // 既存タスクのチェック - 同じネットワークIDで既にタスクが存在する場合は重複を避ける
       const existingTasks = await daos.tasks.findByNetworkId(networkId);
       if (existingTasks.length > 0) {
-        console.log(`⚠️ Tasks already exist for network ${networkId}. Found ${existingTasks.length} existing tasks.`);
-        
-        // 既存タスクのステップ番号を取得
-        const existingSteps = new Set(existingTasks.map(t => t.step_number).filter(s => s !== undefined && s !== null));
-        
-        // 新しいタスクから既存のステップ番号を除外
-        const newTasks = tasks.filter(t => !existingSteps.has(t.stepNumber));
-        
-        if (newTasks.length === 0) {
-          console.log(`ℹ️ All tasks already exist for network ${networkId}. Skipping creation.`);
+        // ステップ番号重複を避ける（null はメインタスクなので除外して保持）
+        const existingSteps = new Set<number>(
+          existingTasks
+            .map(t => t.step_number)
+            .filter((s): s is number => typeof s === 'number')
+        );
+
+        // 既存と重複する stepNumber を除外
+        const filtered = tasks.filter(t => {
+          const sn = t.stepNumber;
+          if (typeof sn === 'number' && existingSteps.has(sn)) return false;
+          return true;
+        });
+
+        if (filtered.length === 0) {
+          console.log(`ℹ️ All tasks already exist or conflict for network ${networkId}. Skipping creation.`);
           return {
             success: true,
-            createdTasks: existingTasks.map(t => ({
-              taskId: t.task_id,
-              taskType: t.task_type,
-              stepNumber: t.step_number,
-            })),
+            createdTasks: existingTasks
+              .filter(t => typeof t.step_number === 'number')
+              .map(t => ({ taskId: t.task_id, taskType: t.task_type, stepNumber: t.step_number })),
             networkId,
-            totalTasks: existingTasks.length,
-            message: `Using existing ${existingTasks.length} tasks for network ${networkId}`,
+            totalTasks: existingTasks.filter(t => typeof t.step_number === 'number').length,
+            message: `Using existing tasks for network ${networkId}`,
           };
         }
-        
-        console.log(`📝 Creating ${newTasks.length} new tasks (${tasks.length - newTasks.length} already exist)`);
-        // 新しいタスクのみを処理対象とする
-        tasks.splice(0, tasks.length, ...newTasks);
+
+        console.log(`📝 Creating ${filtered.length} new tasks (${tasks.length - filtered.length} skipped for duplication/conflict)`);
+        tasks.splice(0, tasks.length, ...filtered);
       }
       
       // Ensure response time < 100ms by using setTimeout for actual creation
@@ -128,30 +159,42 @@ export const batchTaskCreationTool = createTool({
       
       // 同期で作成（ワークフロー/ネットワークが直後に利用できるようにする）
       const results = await Promise.all(
-        taskDataList.map(taskData =>
-          daos.tasks.create(taskData).catch(err => {
+        taskDataList.map(async (taskData) => {
+          try {
+            return await daos.tasks.create(taskData);
+          } catch (err) {
+            // ユニーク制約違反（同一network_id+step_number）は黙ってスキップ
+            const msg = (err as Error)?.message || '';
+            if (msg.toLowerCase().includes('unique') || msg.toLowerCase().includes('constraint')) {
+              console.warn(`Skip duplicate step ${taskData.step_number} for network ${networkId}`);
+              return null;
+            }
             console.error(`Failed to create task ${taskData.task_id}:`, err);
             return null;
-          })
-        )
+          }
+        })
       );
 
       const successCount = results.filter(r => r !== null).length;
+      try { await setNetworkStage(networkId, 'planning'); } catch {}
       console.log(`✅ Batch created ${successCount}/${taskDataList.length} tasks for network ${networkId}`);
 
-      // Update network metadata with task plan（存在しない場合は無視）
+      // Update network metadata with task plan（マージで保存: stage/policyを壊さない）
       try {
         const networkSummary = {
-          totalTasks: taskDataList.length,
-          taskPlan: taskDataList.map(t => ({
-            step: t.step_number,
-            type: t.task_type,
-            description: t.task_description,
-            dependsOn: t.depends_on,
-          })),
-          createdAt: new Date().toISOString(),
-        };
-        await daos.tasks.updateMetadata?.(networkId, networkSummary as unknown as Record<string, unknown>);
+          plan: {
+            totalTasks: taskDataList.length,
+            taskPlan: taskDataList.map(t => ({
+              step: t.step_number,
+              type: t.task_type,
+              description: t.task_description,
+              dependsOn: t.depends_on,
+            })),
+            createdAt: new Date().toISOString(),
+          }
+        } as Record<string, unknown>;
+        const { mergeNetworkMetadata } = await import('./routing-validators');
+        await mergeNetworkMetadata(networkId, networkSummary);
       } catch (err) {
         console.error('Failed to update network metadata:', err);
       }
