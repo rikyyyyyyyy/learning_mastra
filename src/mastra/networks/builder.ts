@@ -22,7 +22,22 @@ export function buildNetwork(params: NetworkBuildParams): NewAgentNetwork {
   return new NewAgentNetwork({
     id,
     name,
-    instructions,
+    instructions: `
+${instructions}
+
+【Routing Contract（重要）】
+- stageの順序: initialized → policy_set → planning → executing → finalizing → completed
+- 主要エラーコードと行動:
+  - POLICY_NOT_SET: CEOがsave_policyを実行するまで待機
+  - INVALID_STAGE: 現在stageで許可された操作のみ行う
+  - TASK_NOT_FOUND / TASK_NOT_QUEUED: 小タスクの存在/状態を見直す
+  - RESULT_PARTIAL_CONTINUE_REQUIRED: 同一Workerが継続生成するまで完了処理を行わない
+  - SUBTASKS_INCOMPLETE: 最終保存せず、未完了タスクの完了を待つ
+
+【一般ルール】
+- 全ツールはJSONオブジェクト入力のみ
+- ツールがエラーを返したら再試行せず、エラーコードに従って正しい役割へルーティング
+`,
     model,
     agents,
     defaultAgent,
@@ -31,4 +46,3 @@ export function buildNetwork(params: NetworkBuildParams): NewAgentNetwork {
       : undefined,
   });
 }
-

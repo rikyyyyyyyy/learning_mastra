@@ -146,6 +146,7 @@ export const taskViewerTool = createTool({
           
           // 完了したタスクの結果を集計
           const completedTasks = subTasks.filter(t => t.status === 'completed');
+          const partialCount = subTasks.filter(t => !!(((t.metadata as any)?.result)?.partial)).length;
           
           return {
             success: true,
@@ -163,6 +164,7 @@ export const taskViewerTool = createTool({
                 completed: completedTasks.length,
                 failed: subTasks.filter(t => t.status === 'failed').length,
               },
+              partialCount,
               completedResults: completedTasks.map(t => ({
                 stepNumber: t.step_number,
                 taskType: t.task_type,

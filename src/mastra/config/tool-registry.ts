@@ -74,9 +74,10 @@ export function getToolsForRole(role: AgentRole): Record<string, unknown> {
       return {
         exaMCPSearchTool,
         docsReaderTool,
+        // Workerもタスク状態・結果を直接更新できる（running/partial等）
+        taskManagementTool,
       };
     default:
       return {};
   }
 }
-

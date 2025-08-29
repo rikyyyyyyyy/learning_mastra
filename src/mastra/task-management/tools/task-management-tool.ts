@@ -2,6 +2,18 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { getDAOs } from '../db/dao';
 import { TaskStatus } from '../db/schema';
+import {
+  ERROR_CODES,
+  requirePolicy,
+  requireStage,
+  setNetworkStage,
+  requireTaskExists,
+  ensureQueued,
+  ensureNotRunning,
+  computeNextStageOnFirstRun,
+  checkPartialContinuity,
+  ensureTaskIsNextAndNoConcurrent,
+} from './routing-validators';
 
 // Task Management Tool - Manager用のタスク管理ツール
 export const taskManagementTool = createTool({
@@ -20,6 +32,7 @@ export const taskManagementTool = createTool({
       'get_pending_tasks',
       'get_next_task',
       'delete_tasks_from_step',
+      'complete_task',
     ]),
     networkId: z.string().describe('Network ID for the agent network'),
     taskId: z.string().optional().describe('Task ID for operations that require it'),
@@ -44,6 +57,7 @@ export const taskManagementTool = createTool({
     summary: z.any().optional(),
     message: z.string().optional(),
     error: z.string().optional(),
+    errorCode: z.string().optional(),
   }),
   execute: async ({ context, runtimeContext }) => {
     const startTime = Date.now();
@@ -73,6 +87,15 @@ export const taskManagementTool = createTool({
 
       switch (action) {
         case 'create_task': {
+          // 前提: policy があること、stage=planningのみ
+          const policy = await requirePolicy(networkId);
+          if (!policy.success) {
+            return { success: false, action, error: (policy as any).message, errorCode: ERROR_CODES.POLICY_NOT_SET };
+          }
+          const st = await requireStage(networkId, ['planning']);
+          if (!st.success) {
+            return { success: false, action, error: (st as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
+          }
           if (!taskData?.taskType || !taskData?.taskDescription) {
             return {
               success: false,
@@ -115,7 +138,39 @@ export const taskManagementTool = createTool({
               error: 'Missing required fields: taskId, status',
             };
           }
-
+          // 実体取得
+          const existing = await daos.tasks.findById(taskId);
+          if (!existing) {
+            return { success: false, action, taskId, error: `Task ${taskId} not found`, errorCode: ERROR_CODES.TASK_NOT_FOUND };
+          }
+          // runningへ移行時の厳密チェック
+          if (status === 'running') {
+            const q = ensureQueued(existing);
+            if (!q.success) return { success: false, action, taskId, error: (q as any).message, errorCode: ERROR_CODES.TASK_NOT_QUEUED };
+            const nr = ensureNotRunning(existing);
+            if (!nr.success) return { success: false, action, taskId, error: (nr as any).message, errorCode: ERROR_CODES.TASK_ALREADY_RUNNING };
+            // 順序・同時実行制御
+            const gate = await requireStage(networkId, ['planning', 'executing']);
+            if (!gate.success) return { success: false, action, taskId, error: (gate as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
+            const seq = await (async () => ensureTaskIsNextAndNoConcurrent(networkId, existing))();
+            if (!seq.success) return { success: false, action, taskId, error: (seq as any).message, errorCode: (seq as any).errorCode };
+            // 初回実行なら stage を executing へ引き上げ
+            try {
+              const st = await requireStage(networkId, ['planning', 'executing']);
+              if (st.success) {
+                const next = computeNextStageOnFirstRun((st as any).stage);
+                if (next === 'executing') await setNetworkStage(networkId, 'executing');
+              }
+            } catch {}
+          }
+          // completed へ移行時: 部分出力のまま完了は不可
+          if (status === 'completed') {
+            const md = (existing.metadata as Record<string, unknown> | undefined) || {};
+            const isPartial = !!(md.result as Record<string, unknown> | undefined)?.partial;
+            if (isPartial) {
+              return { success: false, action, taskId, error: 'Result is partial; require same worker to continue', errorCode: ERROR_CODES.RESULT_PARTIAL_CONTINUE_REQUIRED };
+            }
+          }
           await daos.tasks.updateStatus(taskId, status);
 
           return {
@@ -153,8 +208,37 @@ export const taskManagementTool = createTool({
               error: 'Missing required fields: taskId, result',
             };
           }
-
+          const existing = await daos.tasks.findById(taskId);
+          if (!existing) {
+            return { success: false, action, taskId, error: `Task ${taskId} not found`, errorCode: ERROR_CODES.TASK_NOT_FOUND };
+          }
+          // 追加パラメータ: resultMode / authorAgentId
+          const resultMode = (context as Record<string, unknown>)['resultMode'] as 'partial' | 'final' | undefined;
+          const authorAgentId = (context as Record<string, unknown>)['authorAgentId'] as string | undefined;
+          if (resultMode === 'final' && authorAgentId) {
+            const cont = checkPartialContinuity(existing, authorAgentId, true);
+            if (!cont.success) {
+              return { success: false, action, taskId, error: (cont as any).message, errorCode: ERROR_CODES.RESULT_PARTIAL_CONTINUE_REQUIRED };
+            }
+          }
           await daos.tasks.updateResult(taskId, result);
+          // partial の記録
+          try {
+            if (resultMode === 'partial' && authorAgentId) {
+              const md = (existing.metadata as Record<string, unknown> | undefined) || {};
+              const updatedMd = { ...md, result: { ...(md.result as Record<string, unknown> || {}), partial: true, lastAuthor: authorAgentId, lastUpdatedAt: new Date().toISOString() } };
+              await daos.tasks.updateMetadata(taskId, updatedMd);
+            } else if (resultMode === 'final') {
+              const md = (existing.metadata as Record<string, unknown> | undefined) || {};
+              const updatedMd = { ...md, result: { ...(md.result as Record<string, unknown> || {}), partial: false } };
+              await daos.tasks.updateMetadata(taskId, updatedMd);
+              // オプション: 自動完了
+              const autoComplete = (context as Record<string, unknown>)['autoCompleteFinal'] as boolean | undefined;
+              if (autoComplete) {
+                await daos.tasks.updateStatus(taskId, 'completed');
+              }
+            }
+          } catch {}
 
           return {
             success: true,
@@ -162,6 +246,31 @@ export const taskManagementTool = createTool({
             taskId,
             message: `Task ${taskId} result updated`,
           };
+        }
+
+        case 'complete_task': {
+          if (!taskId) {
+            return { success: false, action, error: 'Missing required field: taskId' };
+          }
+          const existing = await daos.tasks.findById(taskId);
+          if (!existing) return { success: false, action, taskId, error: `Task ${taskId} not found`, errorCode: ERROR_CODES.TASK_NOT_FOUND };
+          // Allow optional result & continuity checks
+          const resultMode = ((context as Record<string, unknown>)['resultMode'] as 'final'|'partial'|undefined) || 'final';
+          const authorAgentId = (context as Record<string, unknown>)['authorAgentId'] as string | undefined;
+          if (result !== undefined) {
+            if (resultMode === 'final' && authorAgentId) {
+              const cont = checkPartialContinuity(existing, authorAgentId, true);
+              if (!cont.success) return { success: false, action, taskId, error: (cont as any).message, errorCode: ERROR_CODES.RESULT_PARTIAL_CONTINUE_REQUIRED };
+            }
+            await daos.tasks.updateResult(taskId, result);
+          }
+          // Cannot complete if partial flag is set
+          const md = (existing.metadata as Record<string, unknown> | undefined) || {};
+          if ((md.result as Record<string, unknown> | undefined)?.partial) {
+            return { success: false, action, taskId, error: 'Result is partial; require same worker to continue', errorCode: ERROR_CODES.RESULT_PARTIAL_CONTINUE_REQUIRED };
+          }
+          await daos.tasks.updateStatus(taskId, 'completed');
+          return { success: true, action, taskId, message: `Task ${taskId} completed` };
         }
 
         case 'assign_worker': {
@@ -172,7 +281,12 @@ export const taskManagementTool = createTool({
               error: 'Missing required fields: taskId, workerId',
             };
           }
-
+          const st = await requireStage(networkId, ['planning', 'executing']);
+          if (!st.success) {
+            return { success: false, action, taskId, error: (st as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
+          }
+          const ex = await requireTaskExists(taskId);
+          if (!ex.success) return { success: false, action, taskId, error: (ex as any).message, errorCode: ERROR_CODES.TASK_NOT_FOUND };
           await daos.tasks.assignWorker(taskId, workerId);
 
           return {
@@ -200,6 +314,7 @@ export const taskManagementTool = createTool({
               action,
               taskId,
               error: `Task ${taskId} not found`,
+              errorCode: ERROR_CODES.TASK_NOT_FOUND,
             };
           }
 
@@ -229,6 +344,8 @@ export const taskManagementTool = createTool({
               createdAt: t.created_at,
               completedAt: t.completed_at,
               stepNumber: t.step_number,
+              resultPartial: !!(((t.metadata as any)?.result)?.partial),
+              lastAuthor: ((t.metadata as any)?.result)?.lastAuthor,
             })),
             message: `Found ${tasks.length} tasks in network ${networkId}`,
           };
@@ -264,6 +381,7 @@ export const taskManagementTool = createTool({
               description: task.task_description,
               stepNumber: task.step_number,
               createdAt: task.created_at,
+              resultPartial: !!(((task.metadata as any)?.result)?.partial),
             },
             message: `Next task is ${task.task_id}`,
           };
@@ -293,6 +411,11 @@ export const taskManagementTool = createTool({
               action,
               error: 'Missing required field: fromStepNumber',
             };
+          }
+          // planningのみ許可（実行後は不可）
+          const st = await requireStage(networkId, ['planning']);
+          if (!st.success) {
+            return { success: false, action, error: (st as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
           }
           await daos.tasks.deleteTasksFromStep(networkId, context.fromStepNumber);
           return {

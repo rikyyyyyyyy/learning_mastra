@@ -55,8 +55,20 @@ export async function resolveNetworkFromDB(options: {
   const instructions = `
 ## エージェントネットワーク実行フロー
 
-このネットワークは複数エージェントが並列的な役割分担で協働します。
-ルーティングは各エージェントの役割と追加指令に基づいて決まります。
+CEO-Manager-Worker が厳密なルーティング契約に従って協働します。
+ルーティングはToolのエラーコードによって強制され、誤順序時は自動で適切な役割に戻ります。
+
+【Routing Contract（重要）】
+- stage: initialized → policy_set → planning → executing → finalizing → completed
+- エラーコード:
+  - POLICY_NOT_SET → CEOによるsave_policy
+  - INVALID_STAGE → stageに適合する操作のみ実施
+  - TASK_NOT_FOUND/TASK_NOT_QUEUED → 小タスク定義・状態の修正
+  - RESULT_PARTIAL_CONTINUE_REQUIRED → 同一Workerが継続生成
+  - SUBTASKS_INCOMPLETE → 最終保存を行わず完了待機
+
+【指示】
+- 全ツール入力はJSON辞書のみ。エラーは再試行せずエージェントを切り替えること。
 `;
 
   const network = buildNetwork({

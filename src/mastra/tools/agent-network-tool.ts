@@ -3,15 +3,13 @@ import { z } from 'zod';
 import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
 import { NewAgentNetwork } from '@mastra/core/network/vNext';
 import { Agent } from '@mastra/core/agent';
-import { RuntimeContext } from '@mastra/core/di';
-import { resolveModel, resolveModelWithOptions } from '../config/model-registry';
+import { resolveModel } from '../config/model-registry';
 import { createRoleAgent } from '../agents/factory';
 import { buildNetwork } from '../networks/builder';
 import { resolveNetworkFromDB } from '../networks/resolver';
 import { sharedMemory } from '../shared-memory';
 import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
 import { createAgentLogger } from '../utils/agent-logger';
-import { extractSystemContext } from '../utils/shared-context';
 
 // ===== Typed stream event definitions and helpers =====
 type AgentRoutingChunk = {
@@ -221,22 +219,13 @@ const executeAgentNetwork = async (
 
     // 選択されたモデルをruntimeContextから取得し、対応するLanguageModelを解決
     const selectedModelType = (runtimeContext as { get: (key: string) => unknown })?.get?.('selectedModel') as string | undefined;
-    const modelOptions = (runtimeContext as { get: (key: string) => unknown })?.get?.('modelOptions') as Record<string, unknown> | undefined;
-    const { aiModel: networkModel, info: networkModelInfo } = modelOptions
-      ? resolveModelWithOptions(selectedModelType, modelOptions)
-      : resolveModel(selectedModelType);
+    const { aiModel: networkModel, info: networkModelInfo } = resolveModel(selectedModelType);
     logger.info(`エージェントネットワーク用モデル model=${networkModelInfo.displayName} provider=${networkModelInfo.provider}`);
 
-    // RuntimeContextからシステムコンテキストを抽出
-    const systemContext = runtimeContext ? extractSystemContext(runtimeContext as RuntimeContext) : undefined;
-    if (systemContext) {
-      logger.info(`システムコンテキストを使用 timestamp=${systemContext.timestamp} timezone=${systemContext.timezone}`);
-    }
-
     // 選択モデルで各ロールのエージェントを動的生成（ファクトリ経由）
-    const ceoAgent = createRoleAgent({ role: 'CEO', modelKey: selectedModelType, memory: sharedMemory, systemContext, modelOptions });
-    const managerAgent = createRoleAgent({ role: 'MANAGER', modelKey: selectedModelType, memory: sharedMemory, systemContext, modelOptions });
-    const workerAgent = createRoleAgent({ role: 'WORKER', modelKey: selectedModelType, memory: sharedMemory, systemContext, modelOptions });
+    const ceoAgent = createRoleAgent({ role: 'CEO', modelKey: selectedModelType, memory: sharedMemory });
+    const managerAgent = createRoleAgent({ role: 'MANAGER', modelKey: selectedModelType, memory: sharedMemory });
+    const workerAgent = createRoleAgent({ role: 'WORKER', modelKey: selectedModelType, memory: sharedMemory });
 
     // メモリ設定を準備
     const resourceId = (runtimeContext as { get: (key: string) => unknown })?.get?.('resourceId') as string | undefined;
@@ -252,7 +241,7 @@ const executeAgentNetwork = async (
     // エージェントネットワークを作成（DB定義があれば優先採用。無ければ従来の固定構築）
     let agentNetwork: InstanceType<typeof NewAgentNetwork>;
     try {
-      const resolved = await resolveNetworkFromDB({ memory, modelOptions });
+      const resolved = await resolveNetworkFromDB({ memory });
       logger.info(`DB定義のネットワークを使用します id=${resolved.network.id}`);
       agentNetwork = resolved.network as unknown as InstanceType<typeof NewAgentNetwork>;
     } catch (e) {
@@ -263,7 +252,7 @@ const executeAgentNetwork = async (
         instructions: `
 ## エージェントネットワーク
 
-CEO-Manager-Workerが並列的な役割分担で協働します。
+CEO-Manager-Workerが以下の役割分担で協働します。
 
 CEO:タスクの方針の決定者
 Manager:タスクの分解(小タスクの生成と小タスク結果の保存)
@@ -327,7 +316,8 @@ ${inputData.context?.additionalInstructions ? `追加指示: ${inputData.context
 
     // カスタムオプションでエージェントネットワークのloopメソッドを実行
     const networkOptions = {
-      maxIterations: 10,
+      // タスク数や部分出力の継続を考慮して余裕を持たせる
+      maxIterations: 100,
       debug: process.env.AGENT_NETWORK_DEBUG === 'true',
       stream: true,
     };
@@ -725,92 +715,29 @@ ${inputData.context?.additionalInstructions ? `追加指示: ${inputData.context
       executionTime: `${executionTime}s`,
     };
     
-    // ログストアのジョブを完了としてマーク（暫定）。この後に最終成果物の存在チェックを行う
-    agentLogStore.completeJob(jobId, executionSummary);
-    
-    // --- 最終成果物の存在チェック & ヘルスチェック（リトライ） ---
+    // 完了判定はファイル存在ではなくDBのstageに委ねる
     try {
-      const fs = await import('fs');
-      const path = await import('path');
-      const JOB_RESULTS_DIR = path.join(process.cwd(), '.job-results');
-      const resultPath = path.join(JOB_RESULTS_DIR, `${jobId}.json`);
-
-      // ヘルスチェック: サブタスクが1件も作成されていない/保存されていない場合の検出
-      let hasAnySubtasks = false;
-      try {
-        const { getDAOs } = await import('../task-management/db/dao');
-        const daos = getDAOs();
-        const tasks = await daos.tasks.findByNetworkId(jobId);
-        const subTasks = tasks.filter(t => t.step_number !== null && t.step_number !== undefined);
-        hasAnySubtasks = subTasks.length > 0;
-        if (!hasAnySubtasks) {
-          console.warn(`⚠️ サブタスクが作成/保存されていません。networkId=${jobId}`);
-        }
-      } catch (e) {
-        console.warn('⚠️ ヘルスチェック中にエラーが発生しました（継続）:', e);
-      }
-
-      // サブタスクが1件も無い場合は強制失敗
-      if (!hasAnySubtasks) {
-        const errorMessage = 'No subtasks were created/saved. Planning/execution may have failed.';
-        updateJobStatus(jobId, 'failed', { error: errorMessage });
-        try {
-          const { getDAOs } = await import('../task-management/db/dao');
-          const daos = getDAOs();
-          await daos.tasks.updateStatus(jobId, 'failed');
-        } catch (dbError) {
-          console.warn('⚠️ タスク失敗ステータス更新に失敗:', dbError);
-        }
-        console.error(`❌ サブタスク未作成のため失敗としてマーク: jobId=${jobId}`);
-        return;
-      }
-
-      // 最終成果物の存在を最大3回（合計~3秒）リトライして確認
-      let resultExists = fs.existsSync(resultPath);
-      if (!resultExists) {
-        for (let i = 0; i < 3; i++) {
-          await new Promise((r) => setTimeout(r, 1000));
-          resultExists = fs.existsSync(resultPath);
-          if (resultExists) break;
-        }
-      }
-
-      if (resultExists) {
-        // 結果ファイルが存在する場合は completed に遷移
+      const { getDAOs } = await import('../task-management/db/dao');
+      const daos = getDAOs();
+      const main = await daos.tasks.findById(jobId);
+      const stage = (main?.metadata as Record<string, unknown> | undefined)?.stage as string | undefined;
+      if (stage === 'completed') {
         updateJobStatus(jobId, 'completed');
-        try {
-          const { getDAOs } = await import('../task-management/db/dao');
-          const daos = getDAOs();
-          await daos.tasks.updateStatus(jobId, 'completed');
-        } catch (dbError) {
-          console.warn('⚠️ タスク完了ステータス更新に失敗:', dbError);
-        }
-        logger.info(`エージェントネットワーク実行完了 jobId=${jobId} taskType=${inputData.taskType} time=${executionTime}s ts=${new Date().toISOString()}`);
+        agentLogStore.completeJob(jobId, executionSummary);
+        logger.info(`エージェントネットワーク実行完了（stage=completed） jobId=${jobId} taskType=${inputData.taskType} time=${executionTime}s`);
+      } else if (stage === 'finalizing' || stage === 'executing' || stage === 'planning' || stage === 'policy_set') {
+        // 未完了。ステータスはrunningのまま維持し、ログジョブも閉じない。
+        updateJobStatus(jobId, 'running');
+        logger.info(`ネットワーク処理は終了したが最終保存未完了（stage=${stage}）。完了はツール側で行います。jobId=${jobId}`);
       } else {
-        // 結果が存在しない場合は failed に遷移し、エラーメッセージを保存
-        const errorMessage = 'Final result file not found. CEO may have failed to save the final result.';
-        updateJobStatus(jobId, 'failed', { error: errorMessage });
-        try {
-          const { getDAOs } = await import('../task-management/db/dao');
-          const daos = getDAOs();
-          await daos.tasks.updateStatus(jobId, 'failed');
-        } catch (dbError) {
-          console.warn('⚠️ タスク失敗ステータス更新に失敗:', dbError);
-        }
-        console.error(`❌ 最終成果物未保存のため失敗としてマーク: jobId=${jobId} message="${errorMessage}"`);
+        // stage不明時は保守的にrunning維持
+        updateJobStatus(jobId, 'running');
+        logger.warn(`stage未設定のため完了判定を見送り。jobId=${jobId}`);
       }
-    } catch (checkError) {
-      console.warn('⚠️ 最終成果物チェック中にエラーが発生しました（継続）:', checkError);
-      // チェック自体に失敗した場合は従来通り完了でマーク（保守的運用）
-      updateJobStatus(jobId, 'completed');
-      try {
-        const { getDAOs } = await import('../task-management/db/dao');
-        const daos = getDAOs();
-        await daos.tasks.updateStatus(jobId, 'completed');
-      } catch (dbError) {
-        console.warn('⚠️ タスク完了ステータス更新に失敗:', dbError);
-      }
-      logger.info(`エージェントネットワーク実行完了（チェック失敗のため既定完了） jobId=${jobId} time=${executionTime}s`);
+    } catch (e) {
+      // 判定失敗時も完了扱いにしない
+      updateJobStatus(jobId, 'running');
+      logger.warn(`完了判定中に例外。状態はrunningを維持: ${String(e)}`);
     }
 
   } catch (error) {
@@ -866,7 +793,8 @@ export const agentNetworkTool = createTool({
   inputSchema: z.object({
     taskType: z.enum(['web-search', 'slide-generation', 'weather', 'other']).describe('Type of task'),
     taskDescription: z.string().min(1),
-    taskParameters: z.record(z.unknown()).describe('Task-specific parameters (object expected)'),
+    // 省略可：Responses連鎖の欠落を避けるためデフォルト空
+    taskParameters: z.record(z.unknown()).default({}).describe('Task-specific parameters (object expected)'),
     context: z.object({
       constraints: z.record(z.unknown()).optional().describe('Any limitations or requirements'),
       expectedOutput: z.string().optional(),
@@ -881,7 +809,7 @@ export const agentNetworkTool = createTool({
     estimatedTime: z.string().optional(),
   }),
   execute: async ({ context, runtimeContext }) => {
-    const { taskType, taskDescription, taskParameters, context: taskContext } = (context as unknown) as
+    const { taskType, taskDescription, taskParameters = {}, context: taskContext } = (context as unknown) as
       | { taskType: 'web-search'; taskDescription: string; taskParameters: { query: string; depth?: 'shallow'|'deep'; language?: string; maxResults?: number }; context?: unknown }
       | { taskType: 'slide-generation'; taskDescription: string; taskParameters: { topic: string; style?: string; pages?: number; language?: string }; context?: unknown }
       | { taskType: 'weather'; taskDescription: string; taskParameters: { location: string; unit?: 'metric'|'imperial'; language?: string }; context?: unknown }

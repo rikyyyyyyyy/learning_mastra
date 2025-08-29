@@ -1,6 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { getDAOs } from '../db/dao';
+import { requirePolicy, requireStage, setNetworkStage, ERROR_CODES } from './routing-validators';
 // import { NetworkTask } from '../db/schema';
 
 // バッチタスク作成ツール - Manager用の一括タスク作成
@@ -31,6 +32,7 @@ export const batchTaskCreationTool = createTool({
     networkId: z.string(),
     totalTasks: z.number(),
     message: z.string(),
+    errorCode: z.string().optional(),
     error: z.string().optional(),
   }),
   execute: async ({ context, runtimeContext }) => {
@@ -49,10 +51,36 @@ export const batchTaskCreationTool = createTool({
             networkId,
             totalTasks: 0,
             message: `Network ID mismatch. expected=${currentJobId} received=${networkId}`,
+            errorCode: ERROR_CODES.NETWORK_ID_MISMATCH,
           };
         }
       } catch {
         // 取得失敗時はスキップ（後方互換）
+      }
+
+      // Policy required
+      const policyCheck = await requirePolicy(networkId);
+      if (!policyCheck.success) {
+        return {
+          success: false,
+          createdTasks: [],
+          networkId,
+          totalTasks: 0,
+          message: (policyCheck as any).message,
+          errorCode: ERROR_CODES.POLICY_NOT_SET,
+        };
+      }
+      // Stage must be policy_set or planning
+      const stageCheck = await requireStage(networkId, ['policy_set', 'planning']);
+      if (!stageCheck.success) {
+        return {
+          success: false,
+          createdTasks: [],
+          networkId,
+          totalTasks: 0,
+          message: (stageCheck as any).message,
+          errorCode: ERROR_CODES.INVALID_STAGE,
+        };
       }
       const daos = getDAOs();
       
@@ -148,21 +176,25 @@ export const batchTaskCreationTool = createTool({
       );
 
       const successCount = results.filter(r => r !== null).length;
+      try { await setNetworkStage(networkId, 'planning'); } catch {}
       console.log(`✅ Batch created ${successCount}/${taskDataList.length} tasks for network ${networkId}`);
 
-      // Update network metadata with task plan（存在しない場合は無視）
+      // Update network metadata with task plan（マージで保存: stage/policyを壊さない）
       try {
         const networkSummary = {
-          totalTasks: taskDataList.length,
-          taskPlan: taskDataList.map(t => ({
-            step: t.step_number,
-            type: t.task_type,
-            description: t.task_description,
-            dependsOn: t.depends_on,
-          })),
-          createdAt: new Date().toISOString(),
-        };
-        await daos.tasks.updateMetadata?.(networkId, networkSummary as unknown as Record<string, unknown>);
+          plan: {
+            totalTasks: taskDataList.length,
+            taskPlan: taskDataList.map(t => ({
+              step: t.step_number,
+              type: t.task_type,
+              description: t.task_description,
+              dependsOn: t.depends_on,
+            })),
+            createdAt: new Date().toISOString(),
+          }
+        } as Record<string, unknown>;
+        const { mergeNetworkMetadata } = await import('./routing-validators');
+        await mergeNetworkMetadata(networkId, networkSummary);
       } catch (err) {
         console.error('Failed to update network metadata:', err);
       }
