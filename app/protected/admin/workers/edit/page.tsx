@@ -1,11 +1,11 @@
 "use client";
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 
 // モデル設定は行わない（自動選択）
 type CustomMCP = { id: string; kind: 'remote' | 'local'; url?: string; command?: string; args?: string };
 
-export default function EditWorkerPage() {
+function EditWorkerPageContent() {
   const router = useRouter();
   const params = useSearchParams();
   const id = params.get('id') || '';
@@ -156,5 +156,13 @@ export default function EditWorkerPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function EditWorkerPage() {
+  return (
+    <Suspense fallback={<div>読み込み中...</div>}>
+      <EditWorkerPageContent />
+    </Suspense>
   );
 }
