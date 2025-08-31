@@ -6,13 +6,13 @@ import { resolveModel, resolveModelWithOptions } from '../config/model-registry'
 import { getSystemContext } from '../utils/shared-context';
 
 // モデルを動的に作成する関数
-// toolMode: 'network' | 'workflow' | 'both'
 // modelOptions: OpenAIモデル向けの追加パラメータ（reasoning等）
 export function createGeneralAgent(
   modelType: string = 'claude-sonnet-4',
-  toolMode: 'workflow' | 'both' = 'workflow',
+  _toolMode: 'workflow' | 'both' = 'workflow',
   modelOptions?: Record<string, unknown>
 ): Agent {
+  void _toolMode; // Parameter kept for function signature compatibility
   const { aiModel, info: modelInfo } = modelOptions
     ? resolveModelWithOptions(modelType, modelOptions)
     : resolveModel(modelType);

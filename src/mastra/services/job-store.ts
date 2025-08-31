@@ -59,7 +59,7 @@ export class JobStore {
   async getStatus(jobId: string): Promise<(JobStatusRow & { metadata?: Record<string, unknown> | null }) | null> {
     const db = await this.getDb();
     const rows = await db.execute({ sql: 'SELECT * FROM job_status WHERE job_id = ?', args: [jobId] });
-    const row = (rows.rows[0] as any) || null;
+    const row = (rows.rows[0] as JobStatusRow & { metadata?: string }) || null;
     if (!row) return null;
     return {
       job_id: row.job_id,
@@ -74,7 +74,7 @@ export class JobStore {
   async getResult(jobId: string): Promise<JobResultRow | null> {
     const db = await this.getDb();
     const rows = await db.execute({ sql: 'SELECT * FROM job_results WHERE job_id = ?', args: [jobId] });
-    const row = (rows.rows[0] as any) || null;
+    const row = (rows.rows[0] as JobResultRow & { result?: string }) || null;
     if (!row) return null;
     return {
       job_id: row.job_id,
@@ -87,8 +87,7 @@ export class JobStore {
   async listCompletedJobs(limit = 100): Promise<string[]> {
     const db = await this.getDb();
     const rows = await db.execute({ sql: "SELECT job_id FROM job_status WHERE status='completed' ORDER BY completed_at DESC LIMIT ?", args: [limit] });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (rows.rows as any[]).map(r => r.job_id as string);
+    return (rows.rows as Array<{ job_id: string }>).map(r => r.job_id);
   }
 }
 

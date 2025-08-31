@@ -5,14 +5,6 @@ import { ensureTaskDBInitialized } from '../task-management/db/init';
 
 // fs依存を廃止し、DBベースのJobStoreに移行
 
-interface JobStatus {
-  status: 'queued' | 'running' | 'completed' | 'failed';
-  result?: unknown;
-  error?: string;
-  startedAt?: Date;
-  completedAt?: Date;
-}
-
 // 互換のための型のみ維持
 
 interface JobResult {
@@ -35,7 +27,7 @@ export const jobStatusTool = createTool({
     jobId: z.string(),
     status: z.enum(['queued', 'running', 'completed', 'failed', 'not_found']),
     message: z.string(),
-    result: z.any().optional(),
+    result: z.unknown().optional(),
     error: z.string().optional(),
     startedAt: z.string().optional(),
     completedAt: z.string().optional(),
@@ -57,7 +49,7 @@ export const jobStatusTool = createTool({
     
     const response = {
       jobId,
-      status: (['queued','running','completed','failed'] as const).includes(status.status as any) ? (status.status as 'queued'|'running'|'completed'|'failed') : 'queued',
+      status: (['queued','running','completed','failed'] as const).includes(status.status as 'queued'|'running'|'completed'|'failed') ? (status.status as 'queued'|'running'|'completed'|'failed') : 'queued',
       message: getStatusMessage(status.status),
       result: undefined,
       error: status.error ?? undefined,
@@ -136,7 +128,7 @@ export async function getJobResult(jobId: string): Promise<JobResult | null> {
       completedAt: fileData.completedAt ? new Date(fileData.completedAt) : new Date(),
       workflowId: fileData.workflowId || 'unknown',
     };
-  } catch (error) {
+  } catch {
     console.log(`❌ ファイルシステムからも結果が見つかりません: ${jobId}`);
     return null;
   }

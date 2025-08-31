@@ -84,8 +84,9 @@ export function resolveModel(modelType?: string): ResolvedModel {
 // 明示解決（フォールバックなし）かつオプション上書き対応
 export function resolveModelWithOptions(
   modelType?: string,
-  overrideOptions?: Record<string, unknown>
+  _overrideOptions?: Record<string, unknown>
 ): ResolvedModel {
+  void _overrideOptions; // Parameter kept for future functionality
   if (!modelType) {
     throw new Error('Model key is required. Use one of: ' + (Object.keys(MODEL_REGISTRY) as string[]).join(', '));
   }
@@ -96,7 +97,7 @@ export function resolveModelWithOptions(
   }
 
   // shallow merge: overrideOptions overwrites defaults
-  const mergedOptions = { ...(def.options || {}), ...(overrideOptions || {}) } as any;
+  // const mergedOptions = { ...(def.options || {}), ...(overrideOptions || {}) };
 
   switch (def.provider) {
     case 'OpenAI':

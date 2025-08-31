@@ -22,6 +22,7 @@ export interface WorkerSelectionHints {
 export interface GenerateOptions {
   memory?: { thread: string; resource: string };
   runtimeContext?: unknown;
+  [key: string]: unknown;
 }
 
 export function createWorkerNetwork(opts: WorkerNetworkOptions = {}) {
@@ -63,7 +64,7 @@ export function createWorkerNetwork(opts: WorkerNetworkOptions = {}) {
     const prompt = messages.map(m => m.content).join('\n');
     const { kind, agent, reason } = selectWorker(hints, prompt);
     try {
-      const { text } = await agent.generate(messages, options as any);
+      const { text } = await agent.generate(messages, options as Record<string, unknown>);
       return { text, chosen: kind, reason };
     } catch (err) {
       const msg = (err as Error)?.message || '';
@@ -79,7 +80,7 @@ export function createWorkerNetwork(opts: WorkerNetworkOptions = {}) {
           'Do NOT pass a raw string or array as tool input. If unsure, avoid tool calls and answer in text.'
       };
       const retryMessages = [systemGuard, ...messages];
-      const { text } = await agent.generate(retryMessages as any, options as any);
+      const { text } = await agent.generate(retryMessages as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>, options as Record<string, unknown>);
       return { text, chosen: kind, reason: reason + ':retry-guard' };
     }
   }

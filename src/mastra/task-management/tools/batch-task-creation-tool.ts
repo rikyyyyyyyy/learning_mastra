@@ -39,7 +39,7 @@ export const batchTaskCreationTool = createTool({
     // const startTime = Date.now();
     
     try {
-      const { networkId, parentJobId, tasks, autoAssign } = context;
+      const { networkId, parentJobId, tasks } = context;
 
       // networkId 一貫性チェック: runtimeContext.currentJobId が存在すれば照合
       try {
@@ -66,7 +66,7 @@ export const batchTaskCreationTool = createTool({
           createdTasks: [],
           networkId,
           totalTasks: 0,
-          message: (policyCheck as any).message,
+          message: (policyCheck as { message?: string }).message || 'Policy check failed',
           errorCode: ERROR_CODES.POLICY_NOT_SET,
         };
       }
@@ -78,7 +78,7 @@ export const batchTaskCreationTool = createTool({
           createdTasks: [],
           networkId,
           totalTasks: 0,
-          message: (stageCheck as any).message,
+          message: (stageCheck as { message?: string }).message || 'Stage check failed',
           errorCode: ERROR_CODES.INVALID_STAGE,
         };
       }
@@ -242,18 +242,3 @@ export const batchTaskCreationTool = createTool({
   },
 });
 
-// Helper function to determine worker assignment based on task type
-function getWorkerForTaskType(taskType: string): string | undefined {
-  const taskTypeMapping: Record<string, string> = {
-    'web-search': 'worker-search-agent',
-    'research': 'worker-research-agent',
-    'code-generation': 'worker-code-agent',
-    'slide-generation': 'worker-slide-agent',
-    'analysis': 'worker-analysis-agent',
-    'report': 'worker-report-agent',
-    'data-processing': 'worker-data-agent',
-    'content-creation': 'worker-content-agent',
-  };
-  
-  return taskTypeMapping[taskType.toLowerCase()] || 'worker-agent';
-}

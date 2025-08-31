@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Database, X, ListTodo, MessageSquareMore, Network } from "lucide-react";
+import { Database, ListTodo, MessageSquareMore, Network } from "lucide-react";
 import {
   Dialog,
   DialogContent,

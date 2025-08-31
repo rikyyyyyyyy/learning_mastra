@@ -3,10 +3,51 @@ import { randomUUID } from 'crypto';
 import { getTaskDB } from './migrations';
 import type {
   ContentStore,
-  ContentChunk,
   Artifact,
   ArtifactRevision,
 } from './schema';
+
+// Database Row Types for type safety
+interface ContentStoreRow {
+  content_hash: string;
+  content_type: string;
+  content: string;
+  size: number;
+  created_at: string;
+  storage_location?: string;
+}
+
+interface ContentChunkRow {
+  chunk_id: string;
+  content_hash: string;
+  chunk_index: number;
+  chunk_data: string;
+  offset: number;
+  size: number;
+  created_at: string;
+}
+
+interface ArtifactRow {
+  artifact_id: string;
+  job_id: string;
+  task_id?: string;
+  current_revision: string;
+  mime_type: string;
+  labels?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ArtifactRevisionRow {
+  revision_id: string;
+  artifact_id: string;
+  content_hash: string;
+  parent_revisions?: string;
+  commit_message: string;
+  author: string;
+  created_at: string;
+  patch_from_parent?: string;
+}
 
 // Content-Addressable Storage DAO
 export class ContentStoreDAO {
@@ -73,7 +114,7 @@ export class ContentStoreDAO {
     
     if (result.rows.length === 0) return null;
     
-    const row = result.rows[0] as any;
+    const row = result.rows[0] as ContentStoreRow;
     return {
       content_hash: row.content_hash,
       content_type: row.content_type,
@@ -139,9 +180,10 @@ export class ContentStoreDAO {
     
     if (result.rows.length === 0) return null;
     
-    const chunks = result.rows.map((row: any) =>
-      Buffer.from(row.chunk_data, 'base64').toString('utf-8')
-    );
+    const chunks = result.rows.map((row) => {
+      const chunkRow = row as ContentChunkRow;
+      return Buffer.from(chunkRow.chunk_data, 'base64').toString('utf-8');
+    });
     
     return chunks.join('');
   }
@@ -158,7 +200,7 @@ export class ContentStoreDAO {
     
     if (result.rows.length === 0) return null;
     
-    const row = result.rows[0] as any;
+    const row = result.rows[0] as Pick<ContentStoreRow, 'size' | 'content_type' | 'created_at'>;
     return {
       size: row.size,
       type: row.content_type,
@@ -248,7 +290,7 @@ export class ArtifactDAO {
     
     if (result.rows.length === 0) return null;
     
-    const row = result.rows[0] as any;
+    const row = result.rows[0] as ArtifactRow;
     return {
       artifact_id: row.artifact_id,
       job_id: row.job_id,
@@ -320,7 +362,7 @@ export class ArtifactDAO {
     
     if (result.rows.length === 0) return null;
     
-    const row = result.rows[0] as any;
+    const row = result.rows[0] as ArtifactRevisionRow;
     return {
       revision_id: row.revision_id,
       artifact_id: row.artifact_id,
@@ -345,16 +387,19 @@ export class ArtifactDAO {
       args: [artifactId],
     });
     
-    return result.rows.map((row: any) => ({
-      revision_id: row.revision_id,
-      artifact_id: row.artifact_id,
-      content_hash: row.content_hash,
-      parent_revisions: row.parent_revisions ? JSON.parse(row.parent_revisions) : undefined,
-      commit_message: row.commit_message,
-      author: row.author,
-      created_at: row.created_at,
-      patch_from_parent: row.patch_from_parent,
-    }));
+    return result.rows.map((row) => {
+      const revRow = row as ArtifactRevisionRow;
+      return {
+        revision_id: revRow.revision_id,
+        artifact_id: revRow.artifact_id,
+        content_hash: revRow.content_hash,
+        parent_revisions: revRow.parent_revisions ? JSON.parse(revRow.parent_revisions) : undefined,
+        commit_message: revRow.commit_message,
+        author: revRow.author,
+        created_at: revRow.created_at,
+        patch_from_parent: revRow.patch_from_parent,
+      };
+    });
   }
 
   /**
@@ -367,16 +412,19 @@ export class ArtifactDAO {
       args: [jobId],
     });
     
-    return result.rows.map((row: any) => ({
-      artifact_id: row.artifact_id,
-      job_id: row.job_id,
-      task_id: row.task_id,
-      current_revision: row.current_revision,
-      mime_type: row.mime_type,
-      labels: row.labels ? JSON.parse(row.labels) : undefined,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    }));
+    return result.rows.map((row) => {
+      const artRow = row as ArtifactRow;
+      return {
+        artifact_id: artRow.artifact_id,
+        job_id: artRow.job_id,
+        task_id: artRow.task_id,
+        current_revision: artRow.current_revision,
+        mime_type: artRow.mime_type,
+        labels: artRow.labels ? JSON.parse(artRow.labels) : undefined,
+        created_at: artRow.created_at,
+        updated_at: artRow.updated_at,
+      };
+    });
   }
 
   /**
@@ -391,7 +439,7 @@ export class ArtifactDAO {
     
     if (result.rows.length === 0) return null;
     
-    const row = result.rows[0] as any;
+    const row = result.rows[0] as ArtifactRow;
     return {
       artifact_id: row.artifact_id,
       job_id: row.job_id,

@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jobStore } from '@/src/mastra/services/job-store';
 
+// JobResultの型定義
+interface AgentJobResult {
+  taskType?: string;
+  success?: boolean;
+  conversationHistory?: Array<{
+    agentId: string;
+    messageType?: string;
+    iteration?: number;
+    [key: string]: unknown;
+  }>;
+  executionSummary?: unknown;
+  [key: string]: unknown;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
@@ -15,32 +29,33 @@ export async function GET(
     }
     
     // エージェント会話履歴を抽出
-    const conversationHistory = (jobResult.result as any)?.conversationHistory || [];
+    const result = jobResult.result as AgentJobResult;
+    const conversationHistory = result?.conversationHistory || [];
     
     // 会話ログの統計情報を計算
     const conversationStats = {
       totalMessages: conversationHistory.length,
-      messagesByAgent: conversationHistory.reduce((acc: Record<string, number>, entry: { agentId: string }) => {
+      messagesByAgent: conversationHistory.reduce((acc: Record<string, number>, entry) => {
         acc[entry.agentId] = (acc[entry.agentId] || 0) + 1;
         return acc;
       }, {}),
-      messagesByType: conversationHistory.reduce((acc: Record<string, number>, entry: { messageType?: string }) => {
+      messagesByType: conversationHistory.reduce((acc: Record<string, number>, entry) => {
         const type = entry.messageType || 'unknown';
         acc[type] = (acc[type] || 0) + 1;
         return acc;
       }, {}),
       totalIterations: conversationHistory.length > 0 ? 
-        Math.max(...conversationHistory.map((entry: { iteration?: number }) => entry.iteration || 0)) : 0,
+        Math.max(...conversationHistory.map((entry) => entry.iteration || 0)) : 0,
     };
     
     // ジョブメタデータも含める
     const response = {
       jobId,
-      taskType: (jobResult.result as any)?.taskType || 'unknown',
-      success: (jobResult.result as any)?.success || false,
+      taskType: result?.taskType || 'unknown',
+      success: result?.success || false,
       conversationHistory,
       conversationStats,
-      executionSummary: (jobResult.result as any)?.executionSummary || null,
+      executionSummary: result?.executionSummary || null,
       timestamp: jobResult.created_at || new Date().toISOString(),
       // デバッグ情報（環境変数が設定されている場合）
       debug: process.env.AGENT_NETWORK_DEBUG === 'true' ? {

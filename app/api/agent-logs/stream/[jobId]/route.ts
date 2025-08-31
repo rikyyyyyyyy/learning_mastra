@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { agentLogStore, type AgentConversationEntry } from '@/src/mastra/utils/agent-log-store';
 import { logBus } from '@/src/mastra/services/log-bus';
 
+// LogBusイベントの型定義
+interface LogBusEvent {
+  jobId: string;
+  agentId: string;
+  agentName: string;
+  message: string;
+  iteration?: number;
+  messageType?: string;
+  metadata?: unknown;
+  timestamp: string;
+}
+
 // SSEヘッダーの設定
 const SSE_HEADERS = {
   'Content-Type': 'text/event-stream',
@@ -64,7 +76,7 @@ export async function GET(
       let isStreamClosed = false;
       let heartbeatInterval: NodeJS.Timeout | null = null;
       // LogBus リスナーは後で代入（close時に外すための参照を保持）
-      let handleBusLog: ((event: any) => void) | null = null;
+      let handleBusLog: ((event: LogBusEvent) => void) | null = null;
       
       // ストリームが閉じられているかチェックして安全にenqueueする
       const safeEnqueue = (data: Uint8Array): boolean => {
@@ -185,7 +197,7 @@ export async function GET(
       };
       
       // LogBus（新基盤）からのイベントも転送
-      handleBusLog = (event: any) => {
+      handleBusLog = (event: LogBusEvent) => {
         if (event.jobId === jobId && !isStreamClosed) {
           const message = formatSSEMessage('log-entry', {
             jobId,

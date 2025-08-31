@@ -5,8 +5,6 @@ import {
   ERROR_CODES,
   requireStage,
   setNetworkStage,
-  ok,
-  fail,
   ensureRole,
 } from './routing-validators';
 
@@ -51,7 +49,7 @@ export const policyManagementTool = createTool({
       // CEOロールのみ（runtimeContextにroleがあれば検証）
       const roleCheck = ensureRole(runtimeContext, ['CEO']);
       if (!roleCheck.success) {
-        return { success: false, action, networkId, message: (roleCheck as any).message, errorCode: ERROR_CODES.ROLE_FORBIDDEN };
+        return { success: false, action, networkId, message: (roleCheck as { message?: string }).message || 'Role check failed', errorCode: ERROR_CODES.ROLE_FORBIDDEN };
       }
 
       // networkId 一貫性チェック: runtimeContext.currentJobId が存在すれば照合
@@ -82,12 +80,12 @@ export const policyManagementTool = createTool({
       if (action === 'save_policy') {
         const st = await requireStage(networkId, ['initialized', 'policy_set']);
         if (!st.success) {
-          return { success: false, action, networkId, message: (st as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
+          return { success: false, action, networkId, message: (st as { message?: string }).message || 'Stage check failed', errorCode: ERROR_CODES.INVALID_STAGE };
         }
       } else if (action === 'update_policy') {
         const st = await requireStage(networkId, ['policy_set', 'planning', 'executing']);
         if (!st.success) {
-          return { success: false, action, networkId, message: (st as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
+          return { success: false, action, networkId, message: (st as { message?: string }).message || 'Stage check failed', errorCode: ERROR_CODES.INVALID_STAGE };
         }
       }
 
@@ -143,7 +141,8 @@ export const policyCheckTool = createTool({
     message: z.string(),
     stage: z.string().optional(),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ context }, _options) => {
+    void _options;
     const { networkId } = context;
     
     try {
@@ -162,7 +161,7 @@ export const policyCheckTool = createTool({
       
       // メタデータから方針を確認
       const policy = mainTask.metadata?.policy;
-      const stage = (mainTask.metadata as any)?.stage || 'initialized';
+      const stage = ((mainTask.metadata as Record<string, unknown>)?.stage as string) || 'initialized';
       
       if (policy) {
         return {

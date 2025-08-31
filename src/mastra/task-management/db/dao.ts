@@ -63,7 +63,7 @@ export class NetworkTaskDAO extends BaseDAO {
     const fullTask: NetworkTask = {
       ...task,
       // priorityは小タスクでは使わないため、未指定時は'medium'で整合
-      priority: (task as any).priority ?? 'medium',
+      priority: (task as unknown as { priority?: 'low' | 'medium' | 'high' }).priority ?? 'medium',
       created_at: now,
       updated_at: now,
     };

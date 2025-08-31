@@ -76,16 +76,16 @@ export const finalResultTool = createTool({
       // CEO専用（runtimeContext.agentRoleがあれば検証）
       const roleCheck = ensureRole(runtimeContext, ['CEO']);
       if (!roleCheck.success) {
-        return { success: false, message: (roleCheck as any).message, errorCode: ERROR_CODES.ROLE_FORBIDDEN };
+        return { success: false, message: (roleCheck as { message?: string }).message || 'Role check failed', errorCode: ERROR_CODES.ROLE_FORBIDDEN };
       }
       // ステージ検証（executingでも全完了なら自動でfinalizingへ昇格）
       const st = await requireStage(networkId, ['executing', 'finalizing']);
       if (!st.success) {
-        return { success: false, message: (st as any).message, errorCode: ERROR_CODES.INVALID_STAGE };
+        return { success: false, message: (st as { message?: string }).message || 'Stage check failed', errorCode: ERROR_CODES.INVALID_STAGE };
       }
       const ready = await allSubtasksCompleted(networkId);
       if (!ready.success) {
-        return { success: false, message: (ready as any).message, errorCode: ERROR_CODES.SUBTASKS_INCOMPLETE };
+        return { success: false, message: (ready as { message?: string }).message || 'Subtasks not complete', errorCode: ERROR_CODES.SUBTASKS_INCOMPLETE };
       }
       // executing なら finalizing に昇格
       try { await setNetworkStage(networkId, 'finalizing'); } catch {}

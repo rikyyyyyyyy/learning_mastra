@@ -142,8 +142,14 @@ export async function generateWithWorkerNetwork(
 
   // 最後のフォールバック（ネットワークAPIが利用不可の場合）: デフォルトエージェントで実行
   const defAgent: Agent = (anyNet.defaultAgent as Agent) || (anyNet.agents?.general as Agent);
+  const generateOptions: Record<string, unknown> = {
+    runtimeContext: options?.runtimeContext
+  };
+  if (options?.thread) {
+    generateOptions.memory = { thread: options.thread, resource: options?.resource || '' };
+  }
   const { text } = await defAgent.generate([
     { role: 'user', content: userText },
-  ], { memory: { thread: options?.thread, resource: options?.resource }, runtimeContext: options?.runtimeContext });
+  ], generateOptions);
   return text as string;
 }

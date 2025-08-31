@@ -18,11 +18,12 @@ export async function GET() {
     );
     files.sort((a, b) => b.mtime - a.mtime);
     return NextResponse.json({ files });
-  } catch (err: any) {
-    if (err?.code === "ENOENT") {
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException;
+    if (error?.code === "ENOENT") {
       return NextResponse.json({ files: [] });
     }
-    return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });
+    return NextResponse.json({ error: error?.message || "Unknown error" }, { status: 500 });
   }
 }
 

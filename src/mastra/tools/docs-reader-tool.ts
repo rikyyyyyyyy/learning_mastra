@@ -55,7 +55,7 @@ export const docsReaderTool = createTool({
       }
 
       return { content: sliced, from: path, truncated };
-    } catch (e) {
+    } catch {
       return { content: '', from: path, truncated: false };
     }
   },

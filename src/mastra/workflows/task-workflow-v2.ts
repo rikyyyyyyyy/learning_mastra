@@ -32,12 +32,25 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
     createStep({
       id: 'ceo-policy',
       description: 'CEO reviews the task and (if needed) saves/updates policy using its tools',
-      inputSchema: z.object({ jobId: z.string(), taskType: TaskTypeEnum, taskDescription: z.string(), taskParameters: z.record(z.unknown()) }),
+      inputSchema: z.object({ 
+        jobId: z.string(), 
+        taskType: TaskTypeEnum, 
+        taskDescription: z.string(), 
+        taskParameters: z.record(z.unknown()).optional().default({}),
+        selectedModel: z.string().optional(),
+        modelOptions: z.record(z.unknown()).optional(),
+        context: z.object({
+          priority: z.enum(['low', 'medium', 'high']).optional(),
+          constraints: z.record(z.unknown()).optional(),
+          expectedOutput: z.string().optional(),
+          additionalInstructions: z.string().optional(),
+        }).optional(),
+      }),
       outputSchema: z.object({ ok: z.boolean() }),
       execute: async ({ inputData, runtimeContext }) => {
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
         const jobId = inputData.jobId;
-        const selectedModel = ((inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
+        const selectedModel = ((inputData as { selectedModel?: string }).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
         try { if (!rc.get?.('threadId')) rc.set?.('threadId', jobId); if (!rc.get?.('resourceId')) rc.set?.('resourceId', jobId); } catch {}
 
         agentLogStore.addLogEntry(jobId, formatAgentMessage('ceo', 'CEO Agent', '方針策定フェーズを開始します。', 1, 'internal'));
@@ -60,18 +73,31 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       },
     })
   )
-  .map(async ({ getInitData }) => ({ ...(getInitData() as any) }))
+  .map(async ({ getInitData }) => ({ ...(getInitData() as Record<string, unknown>) }))
   // Manager: Plan and register subtasks (agent uses its own tools)
   .then(
     createStep({
       id: 'manager-plan',
       description: 'Manager plans and registers subtasks using task management tools',
-      inputSchema: z.object({ jobId: z.string(), taskType: TaskTypeEnum, taskDescription: z.string(), taskParameters: z.record(z.unknown()) }),
+      inputSchema: z.object({ 
+        jobId: z.string(), 
+        taskType: TaskTypeEnum, 
+        taskDescription: z.string(), 
+        taskParameters: z.record(z.unknown()).optional().default({}),
+        selectedModel: z.string().optional(),
+        modelOptions: z.record(z.unknown()).optional(),
+        context: z.object({
+          priority: z.enum(['low', 'medium', 'high']).optional(),
+          constraints: z.record(z.unknown()).optional(),
+          expectedOutput: z.string().optional(),
+          additionalInstructions: z.string().optional(),
+        }).optional(),
+      }),
       outputSchema: z.object({ planned: z.boolean() }),
       execute: async ({ inputData, runtimeContext }) => {
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
         const jobId = inputData.jobId;
-        const selectedModel = ((inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
+        const selectedModel = ((inputData as { selectedModel?: string }).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
         try { if (!rc.get?.('threadId')) rc.set?.('threadId', jobId); if (!rc.get?.('resourceId')) rc.set?.('resourceId', jobId); } catch {}
 
         agentLogStore.addLogEntry(jobId, formatAgentMessage('manager', 'Manager Agent', 'タスク分解フェーズを開始します。', 2, 'internal'));
@@ -93,18 +119,31 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       },
     })
   )
-  .map(async ({ getInitData }) => ({ ...(getInitData() as any) }))
+  .map(async ({ getInitData }) => ({ ...(getInitData() as Record<string, unknown>) }))
   // Manager⇄Workerの非決定ループ（DB黒板に基づく継続判定）
   .then(
     createStep({
       id: 'execute-cycle',
       description: 'Manager reviews, Worker network executes; repeat until DB shows no queued/running tasks or directives',
-      inputSchema: z.object({ jobId: z.string(), taskType: TaskTypeEnum, taskDescription: z.string(), taskParameters: z.record(z.unknown()) }),
+      inputSchema: z.object({ 
+        jobId: z.string(), 
+        taskType: TaskTypeEnum, 
+        taskDescription: z.string(), 
+        taskParameters: z.record(z.unknown()).optional().default({}),
+        selectedModel: z.string().optional(),
+        modelOptions: z.record(z.unknown()).optional(),
+        context: z.object({
+          priority: z.enum(['low', 'medium', 'high']).optional(),
+          constraints: z.record(z.unknown()).optional(),
+          expectedOutput: z.string().optional(),
+          additionalInstructions: z.string().optional(),
+        }).optional(),
+      }),
       outputSchema: z.object({ progressed: z.boolean() }),
       execute: async ({ inputData, runtimeContext }) => {
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
         const jobId = inputData.jobId;
-        const selectedModel = ((inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
+        const selectedModel = ((inputData as { selectedModel?: string }).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
         try { if (!rc.get?.('threadId')) rc.set?.('threadId', jobId); if (!rc.get?.('resourceId')) rc.set?.('resourceId', jobId); } catch {}
 
         const systemContext = extractSystemContext(rc) || undefined;
@@ -159,18 +198,31 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
       },
     })
   )
-  .map(async ({ getInitData }) => ({ ...(getInitData() as any) }))
+  .map(async ({ getInitData }) => ({ ...(getInitData() as Record<string, unknown>) }))
   // CEO: Finalize and save final artifact (agent uses its tool)
   .then(
     createStep({
       id: 'ceo-finalize',
       description: 'CEO consolidates and saves final result using its tools',
-      inputSchema: z.object({ jobId: z.string(), taskType: TaskTypeEnum, taskDescription: z.string(), taskParameters: z.record(z.unknown()) }),
+      inputSchema: z.object({ 
+        jobId: z.string(), 
+        taskType: TaskTypeEnum, 
+        taskDescription: z.string(), 
+        taskParameters: z.record(z.unknown()).optional().default({}),
+        selectedModel: z.string().optional(),
+        modelOptions: z.record(z.unknown()).optional(),
+        context: z.object({
+          priority: z.enum(['low', 'medium', 'high']).optional(),
+          constraints: z.record(z.unknown()).optional(),
+          expectedOutput: z.string().optional(),
+          additionalInstructions: z.string().optional(),
+        }).optional(),
+      }),
       outputSchema: z.object({ success: z.boolean(), message: z.string() }),
       execute: async ({ inputData, runtimeContext }) => {
         const rc = (runtimeContext as RuntimeContext | undefined) ?? new RuntimeContext();
         const jobId = inputData.jobId;
-        const selectedModel = ((inputData as any).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
+        const selectedModel = ((inputData as { selectedModel?: string }).selectedModel ?? (rc.get?.('selectedModel') as string | undefined)) || 'claude-sonnet-4';
         try { if (!rc.get?.('threadId')) rc.set?.('threadId', jobId); if (!rc.get?.('resourceId')) rc.set?.('resourceId', jobId); } catch {}
 
         agentLogStore.addLogEntry(jobId, formatAgentMessage('ceo', 'CEO Agent', '最終化フェーズを開始します。', 5, 'internal'));

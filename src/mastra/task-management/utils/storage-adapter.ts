@@ -19,16 +19,20 @@ export class LocalStorageAdapter implements StorageAdapter {
   
   constructor(basePath: string = '.artifacts') {
     this.basePath = basePath;
-    // Ensure directory exists
-    const fs = require('fs');
+    // Directory creation will be handled on first store operation
+  }
+
+  private async ensureDirectory(): Promise<void> {
+    const fs = await import('fs');
     if (!fs.existsSync(this.basePath)) {
       fs.mkdirSync(this.basePath, { recursive: true });
     }
   }
   
   async store(key: string, content: Buffer): Promise<void> {
-    const fs = require('fs').promises;
-    const path = require('path');
+    await this.ensureDirectory();
+    const fs = (await import('fs')).promises;
+    const path = await import('path');
     const filePath = path.join(this.basePath, key);
     
     // Create subdirectories if needed (using first 2 chars of hash)
@@ -39,14 +43,14 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
   
   async retrieve(key: string): Promise<Buffer | null> {
-    const fs = require('fs').promises;
-    const path = require('path');
+    const fs = (await import('fs')).promises;
+    const path = await import('path');
     const filePath = path.join(this.basePath, key);
     
     try {
       return await fs.readFile(filePath);
     } catch (error) {
-      if ((error as any).code === 'ENOENT') {
+      if ((error as unknown as { code: string }).code === 'ENOENT') {
         return null;
       }
       throw error;
@@ -54,8 +58,8 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
   
   async exists(key: string): Promise<boolean> {
-    const fs = require('fs').promises;
-    const path = require('path');
+    const fs = (await import('fs')).promises;
+    const path = await import('path');
     const filePath = path.join(this.basePath, key);
     
     try {
@@ -67,14 +71,14 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
   
   async delete(key: string): Promise<void> {
-    const fs = require('fs').promises;
-    const path = require('path');
+    const fs = (await import('fs')).promises;
+    const path = await import('path');
     const filePath = path.join(this.basePath, key);
     
     try {
       await fs.unlink(filePath);
     } catch (error) {
-      if ((error as any).code !== 'ENOENT') {
+      if ((error as unknown as { code: string }).code !== 'ENOENT') {
         throw error;
       }
     }
@@ -82,7 +86,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   
   async getUrl(key: string): Promise<string | null> {
     // For local storage, return file:// URL
-    const path = require('path');
+    const path = await import('path');
     const filePath = path.join(this.basePath, key);
     return `file://${path.resolve(filePath)}`;
   }
@@ -94,7 +98,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 export class S3StorageAdapter implements StorageAdapter {
   private bucket: string;
   private region: string;
-  private client: any; // AWS SDK S3 client
+  private client: unknown; // AWS SDK S3 client
   
   constructor(config: {
     bucket: string;
@@ -119,52 +123,26 @@ export class S3StorageAdapter implements StorageAdapter {
   
   async store(key: string, content: Buffer): Promise<void> {
     // TODO: Implement S3 upload
-    // await this.client.send(new PutObjectCommand({
-    //   Bucket: this.bucket,
-    //   Key: key,
-    //   Body: content,
-    //   ContentType: 'application/octet-stream',
-    // }));
+    void key;
+    void content;
     throw new Error('S3 storage not yet implemented');
   }
   
   async retrieve(key: string): Promise<Buffer | null> {
     // TODO: Implement S3 download
-    // try {
-    //   const response = await this.client.send(new GetObjectCommand({
-    //     Bucket: this.bucket,
-    //     Key: key,
-    //   }));
-    //   return Buffer.from(await response.Body.transformToByteArray());
-    // } catch (error) {
-    //   if (error.name === 'NoSuchKey') {
-    //     return null;
-    //   }
-    //   throw error;
-    // }
+    void key;
     throw new Error('S3 storage not yet implemented');
   }
   
   async exists(key: string): Promise<boolean> {
     // TODO: Implement S3 head object
-    // try {
-    //   await this.client.send(new HeadObjectCommand({
-    //     Bucket: this.bucket,
-    //     Key: key,
-    //   }));
-    //   return true;
-    // } catch {
-    //   return false;
-    // }
+    void key;
     throw new Error('S3 storage not yet implemented');
   }
   
   async delete(key: string): Promise<void> {
     // TODO: Implement S3 delete
-    // await this.client.send(new DeleteObjectCommand({
-    //   Bucket: this.bucket,
-    //   Key: key,
-    // }));
+    void key;
     throw new Error('S3 storage not yet implemented');
   }
   
@@ -178,21 +156,29 @@ export class S3StorageAdapter implements StorageAdapter {
  * Storage factory
  */
 export class StorageFactory {
-  static create(type: string = 'local', config?: any): StorageAdapter {
+  static create(type: string = 'local', config?: unknown): StorageAdapter {
     switch (type) {
       case 'local':
-        return new LocalStorageAdapter(config?.basePath);
+        const localConfig = config as { basePath?: string } | undefined;
+        return new LocalStorageAdapter(localConfig?.basePath);
       
       case 's3':
         if (!config) {
           throw new Error('S3 configuration required');
         }
+        const s3Config = config as { 
+          bucket?: string; 
+          region?: string; 
+          accessKey?: string; 
+          secretKey?: string; 
+          endpoint?: string; 
+        };
         return new S3StorageAdapter({
-          bucket: config.bucket || process.env.ARTIFACT_S3_BUCKET!,
-          region: config.region || process.env.ARTIFACT_S3_REGION || 'us-east-1',
-          accessKey: config.accessKey || process.env.ARTIFACT_S3_ACCESS_KEY,
-          secretKey: config.secretKey || process.env.ARTIFACT_S3_SECRET_KEY,
-          endpoint: config.endpoint || process.env.ARTIFACT_S3_ENDPOINT,
+          bucket: s3Config.bucket || process.env.ARTIFACT_S3_BUCKET!,
+          region: s3Config.region || process.env.ARTIFACT_S3_REGION || 'us-east-1',
+          accessKey: s3Config.accessKey || process.env.ARTIFACT_S3_ACCESS_KEY,
+          secretKey: s3Config.secretKey || process.env.ARTIFACT_S3_SECRET_KEY,
+          endpoint: s3Config.endpoint || process.env.ARTIFACT_S3_ENDPOINT,
         });
       
       // Future: Add R2, GCS adapters

@@ -53,7 +53,7 @@ export interface AgentDefinitionInput {
   systemContext?: SystemContext; // システムコンテキストをオプションで追加
 }
 
-export function createAgentFromDefinition(def: AgentDefinitionInput, modelOptions?: Record<string, unknown>): Agent {
+export async function createAgentFromDefinition(def: AgentDefinitionInput, modelOptions?: Record<string, unknown>): Promise<Agent> {
   const { aiModel, info } = modelOptions
     ? resolveModelWithOptions(def.modelKey, modelOptions)
     : resolveModel(def.modelKey);
@@ -64,12 +64,12 @@ export function createAgentFromDefinition(def: AgentDefinitionInput, modelOption
   const defaultTools = getToolsForRole(def.role);
   let tools: Record<string, unknown> = defaultTools;
   if (def.tools && def.tools.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const registry = require('../config/tool-registry') as any;
+    // 動的インポートを使用してtool-registryを取得
+    const registry = await import('../config/tool-registry');
     const selected: Record<string, unknown> = {};
     def.tools.forEach((key) => {
-      if (registry.toolRegistry && registry.toolRegistry[key]) {
-        selected[key] = registry.toolRegistry[key];
+      if (registry.toolRegistry && key in registry.toolRegistry) {
+        selected[key] = registry.toolRegistry[key as keyof typeof registry.toolRegistry];
       }
     });
     tools = selected;

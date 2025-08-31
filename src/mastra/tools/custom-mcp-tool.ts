@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { MCPClient } from '@mastra/mcp';
+import { MCPClient, type MastraMCPServerDefinition } from '@mastra/mcp';
 
 export type CustomMCPServer = {
   id: string;
@@ -11,15 +11,15 @@ export type CustomMCPServer = {
 };
 
 export function createCustomMCPTool(servers: CustomMCPServer[]) {
-  const serverConfig: Record<string, unknown> = {};
+  const serverConfig: Record<string, MastraMCPServerDefinition> = {};
   for (const s of servers || []) {
     if (!s?.id) continue;
     if (s.kind === 'remote' && s.url) {
       try {
-        serverConfig[s.id] = { url: new URL(s.url) };
+        serverConfig[s.id] = { url: new URL(s.url) } as MastraMCPServerDefinition;
       } catch {}
     } else if (s.kind === 'local' && s.command) {
-      serverConfig[s.id] = { command: s.command, args: s.args ? s.args.split(' ').filter(Boolean) : [] };
+      serverConfig[s.id] = { command: s.command, args: s.args ? s.args.split(' ').filter(Boolean) : [] } as MastraMCPServerDefinition;
     }
   }
 
@@ -39,7 +39,10 @@ export function createCustomMCPTool(servers: CustomMCPServer[]) {
       if (!serverId || !toolName) return { success: false, result: { error: 'serverId and toolName are required' } };
       if (!serverConfig[serverId]) return { success: false, result: { error: `Unknown serverId: ${serverId}` } };
 
-      const mcp = new MCPClient({ id: 'custom-mcp', servers: { [serverId]: serverConfig[serverId] as unknown } });
+      const mcp = new MCPClient({ 
+        id: 'custom-mcp', 
+        servers: { [serverId]: serverConfig[serverId] }
+      });
       const tools = await mcp.getTools();
       const tool = tools[toolName];
       if (!tool) return { success: false, result: { error: `Tool not found: ${toolName}` } };

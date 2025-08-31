@@ -1,7 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { contentStoreDAO, artifactDAO } from '../db/cas-dao';
-import { createTool as _ } from '@mastra/core/tools';
 
 /**
  * Subtask Artifact Bridge Tool
@@ -55,7 +54,7 @@ export const subtaskArtifactTool = createTool({
     diff: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ context, runtimeContext }) => {
+  execute: async ({ context }) => {
     const { action } = context;
     try {
       const pickMime = (tt?: string, fallback?: string) => {

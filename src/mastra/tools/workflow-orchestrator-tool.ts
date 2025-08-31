@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { initializeJob, updateJobStatus, storeJobResult } from './job-status-tool';
+import { initializeJob, updateJobStatus } from './job-status-tool';
 import { agentLogStore } from '../utils/agent-log-store';
 
 export const workflowOrchestratorTool = createTool({
@@ -74,7 +74,7 @@ export const workflowOrchestratorTool = createTool({
               constraints: taskContext?.constraints,
               additionalInstructions: taskContext?.additionalInstructions,
             },
-          } as any);
+          });
         } catch (e) {
           console.warn('⚠️ メインタスク作成に失敗（継続）:', e);
         }

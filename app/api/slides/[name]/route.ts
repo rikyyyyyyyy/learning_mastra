@@ -19,8 +19,9 @@ export async function GET(
       status: 200,
       headers: { "content-type": "text/html; charset=utf-8" },
     });
-  } catch (err: any) {
-    if (err?.code === "ENOENT") return new Response("Not Found", { status: 404 });
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException;
+    if (error?.code === "ENOENT") return new Response("Not Found", { status: 404 });
     return new Response("Server Error", { status: 500 });
   }
 }

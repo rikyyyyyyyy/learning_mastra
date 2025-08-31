@@ -3,8 +3,29 @@
  * Debug script to analyze task management issues
  */
 
-import { initializeTaskManagementDB } from './db/migrations';
+import { initializeTaskManagementDB, getTaskDB } from './db/migrations';
 import { getDAOs } from './db/dao';
+
+// Type definitions for database rows
+interface TaskRow {
+  network_id: string;
+  task_id: string;
+  task_type: string;
+  task_description: string;
+  step_number?: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CountRow {
+  count: number;
+}
+
+interface RecentNetworkRow {
+  network_id: string;
+  latest: string;
+}
 
 async function debugTasks() {
   console.log('🔍 Debugging Task Management System\n');
@@ -30,16 +51,19 @@ async function debugTasks() {
       ORDER BY network_id, step_number, created_at
     `;
     
-    const db = (daos.tasks as any).db;
+    // Access the database connection directly
+    const taskDB = getTaskDB();
+    if (!taskDB) throw new Error('Database not initialized');
+    const db = taskDB.getDatabase();
     const result = await db.execute({ sql: query, args: [] });
-    const tasks = result.rows || [];
+    const tasks = (result.rows as TaskRow[]) || [];
     
     console.log(`📊 Total tasks in database: ${tasks.length}\n`);
     
     // Group by network_id
-    const tasksByNetwork: Record<string, any[]> = {};
+    const tasksByNetwork: Record<string, TaskRow[]> = {};
     for (const task of tasks) {
-      const networkId = task.network_id as string;
+      const networkId = task.network_id;
       if (!tasksByNetwork[networkId]) {
         tasksByNetwork[networkId] = [];
       }
@@ -57,7 +81,7 @@ async function debugTasks() {
       
       for (const task of networkTasks) {
         const step = task.step_number || 0;
-        const status = task.status;
+        const status = task.status as string;
         
         stepCounts[step] = (stepCounts[step] || 0) + 1;
         statusCounts[status] = (statusCounts[status] || 0) + 1;
@@ -65,7 +89,7 @@ async function debugTasks() {
       
       // Check for duplicates
       const duplicateSteps = Object.entries(stepCounts)
-        .filter(([_, count]) => count > 1)
+        .filter(([, count]) => count > 1)
         .map(([step, count]) => `Step ${step}: ${count} tasks`);
       
       if (duplicateSteps.length > 0) {
@@ -83,7 +107,8 @@ async function debugTasks() {
       networkTasks
         .sort((a, b) => (a.step_number || 0) - (b.step_number || 0))
         .forEach(task => {
-          console.log(`      Step ${task.step_number || '?'}: [${task.status}] ${task.task_type} - ${task.task_description.substring(0, 50)}...`);
+          const description = String(task.task_description).substring(0, 50);
+          console.log(`      Step ${task.step_number || '?'}: [${task.status}] ${task.task_type} - ${description}...`);
           console.log(`         ID: ${task.task_id}`);
         });
     }
@@ -98,7 +123,8 @@ async function debugTasks() {
     `;
     
     const orphanedResult = await db.execute({ sql: orphanedQuery, args: [] });
-    const orphanedCount = orphanedResult.rows[0]?.count || 0;
+    const orphanedRow = orphanedResult.rows[0] as CountRow | undefined;
+    const orphanedCount = orphanedRow?.count || 0;
     
     if (orphanedCount > 0) {
       console.log(`\n⚠️  Found ${orphanedCount} orphaned tasks (tasks without CEO)`);
@@ -115,7 +141,8 @@ async function debugTasks() {
     
     const recentResult = await db.execute({ sql: recentNetworkQuery, args: [] });
     if (recentResult.rows.length > 0) {
-      const recentNetworkId = recentResult.rows[0].network_id;
+      const recentRow = recentResult.rows[0] as RecentNetworkRow;
+      const recentNetworkId = recentRow.network_id;
       console.log(`\n🔎 Analyzing most recent network: ${recentNetworkId}`);
       
       // Check task execution order
