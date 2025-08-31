@@ -10,7 +10,7 @@ import { getSystemContext } from '../utils/shared-context';
 // modelOptions: OpenAIモデル向けの追加パラメータ（reasoning等）
 export function createGeneralAgent(
   modelType: string = 'claude-sonnet-4',
-  toolMode: 'network' | 'workflow' | 'both' = 'both',
+  toolMode: 'workflow' | 'both' = 'workflow',
   modelOptions?: Record<string, unknown>
 ): Agent {
   const { aiModel, info: modelInfo } = modelOptions
@@ -23,19 +23,11 @@ export function createGeneralAgent(
   console.log(`[Mastra Debug] model=${modelInfo.modelId} provider=${modelInfo.provider}`);
 
   const allTools = getToolsForRole('GENERAL') as Record<string, unknown>;
-  const filteredTools = (() => {
-    if (toolMode === 'both') return allTools;
-    const entries = Object.entries(allTools).filter(([key]) => {
-      if (toolMode === 'network') {
-        return key === 'agentNetworkTool' || key === 'slidePreviewTool' || key === 'jobStatusTool' || key === 'jobResultTool' || key === 'taskRegistryTool' || key === 'directiveManagementTool' || key === 'docsReaderTool';
-      }
-      if (toolMode === 'workflow') {
-        return key === 'workflowOrchestratorTool' || key === 'slidePreviewTool' || key === 'jobStatusTool' || key === 'jobResultTool' || key === 'taskRegistryTool' || key === 'directiveManagementTool' || key === 'docsReaderTool';
-      }
-      return true;
-    });
-    return Object.fromEntries(entries);
-  })();
+  const filteredTools = Object.fromEntries(
+    Object.entries(allTools).filter(([key]) => (
+      key === 'workflowOrchestratorTool' || key === 'slidePreviewTool' || key === 'jobStatusTool' || key === 'jobResultTool' || key === 'taskRegistryTool' || key === 'directiveManagementTool' || key === 'docsReaderTool'
+    ))
+  );
 
   // システムコンテキストを取得してプロンプトに注入
   const systemContext = getSystemContext();

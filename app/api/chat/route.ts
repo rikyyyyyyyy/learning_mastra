@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     
     console.log("Chat API: User authenticated:", user.id);
 
-    const { message, threadId, model, toolMode } = await req.json();
+    const { message, threadId, model } = await req.json();
 
     if (!message) {
       console.log("Chat API: Message is required");
@@ -28,10 +28,10 @@ export async function POST(req: NextRequest) {
     console.log("Chat API: Message received:", message);
     console.log("Chat API: ThreadId:", threadId);
     console.log("Chat API: Selected model:", model || "claude-sonnet-4");
-    console.log("Chat API: Tool mode:", toolMode || "both");
+    // ネットワークモードは廃止（常にワークフロー）
 
     // Create agent with selected model
-    const agent = createGeneralAgent(model || 'claude-sonnet-4', (toolMode as 'network'|'workflow'|'both') || 'both');
+    const agent = createGeneralAgent(model || 'claude-sonnet-4', 'workflow');
     
     // モデル情報を取得してログ出力
     const modelInfo = (agent as { _modelInfo?: { displayName: string; provider: string; modelId: string } })._modelInfo;
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     runtimeContext.set('threadId', effectiveThreadId);
     // 選択モデルをネットワーク側に伝播
     if (model) runtimeContext.set('selectedModel', model);
-    if (toolMode) runtimeContext.set('toolMode', toolMode);
+    runtimeContext.set('toolMode', 'workflow');
     
     console.log("Chat API: RuntimeContext created with resourceId:", user.id, "threadId:", effectiveThreadId);
 
@@ -129,14 +129,7 @@ export async function POST(req: NextRequest) {
               }) + '\n';
               controller.enqueue(encoder.encode(event));
               
-              // agent-network-executorの呼び出しも記録（より詳細に）
-              console.log(`🔍 ツール名チェック1: "${toolName}" === "agent-network-executor" ? ${toolName === 'agent-network-executor'}`);
-              console.log(`🔍 ツール名チェック2: "${toolName}" === "agentNetworkTool" ? ${toolName === 'agentNetworkTool'}`);
-              
-              if (toolName === 'agent-network-executor' || toolName === 'agentNetworkTool') {
-                const input = (chunk as unknown as { input?: unknown }).input;
-                console.log(`🤖 エージェントネットワークツール呼び出し検出 (${toolName}) - 引数:`, JSON.stringify(input, null, 2));
-              }
+              // ネットワーク実行ツールは廃止
             }
             
             // ツール結果の場合
@@ -158,34 +151,7 @@ export async function POST(req: NextRequest) {
                 console.log(`  - chunk.output.jobId: ${String(outputObj['jobId'] ?? '')}`);
               }
               
-              // すべてのツール結果で特別な処理が必要か確認
-              console.log(`🔍 ツール名の確認: "${chunk.toolName}" === "agent-network-executor"?`, chunk.toolName === 'agent-network-executor');
-              console.log(`🔍 ツール名の確認: "${chunk.toolName}" === "agentNetworkTool"?`, chunk.toolName === 'agentNetworkTool');
-              
-              // agent-network-executorの結果を処理
-              if (chunk.toolName === 'agent-network-executor' || chunk.toolName === 'agentNetworkTool') {
-                console.log(`🤖 エージェントネットワークツール検出 (名前: ${chunk.toolName})`);
-                console.log(`🤖 結果の型:`, typeof output);
-                console.log(`🤖 結果のキー:`, output && typeof output === 'object' ? Object.keys(output as Record<string, unknown>) : 'null');
-                console.log(`🤖 結果の内容:`, JSON.stringify(output, null, 2));
-                
-                // jobIdは結果オブジェクトの直接のプロパティ
-                if (output && typeof output === 'object' && 'jobId' in output && output.jobId) {
-                  const jobId = String((output as Record<string, unknown>)['jobId']);
-                  const taskType = String((output as Record<string, unknown>)['taskType'] ?? 'unknown');
-                  console.log(`🤖 エージェントネットワークジョブ開始: ${jobId}`);
-                  const event = JSON.stringify({
-                    type: 'agent-network-job',
-                    jobId,
-                    taskType
-                  }) + '\n';
-                  controller.enqueue(encoder.encode(event));
-                  console.log(`📡 agent-network-jobイベントを送信しました: ${jobId}`);
-                } else {
-                  console.error(`❌ jobIdが見つかりません。結果:`, output);
-                  console.error(`❌ chunk全体:`, JSON.stringify(chunk, null, 2));
-                }
-              }
+              // ネットワーク実行ツールは廃止
 
               // workflow-orchestratorの結果を処理
               if (chunk.toolName === 'workflow-orchestrator' || chunk.toolName === 'workflowOrchestratorTool') {
@@ -194,7 +160,7 @@ export async function POST(req: NextRequest) {
                 if (output && typeof output === 'object' && 'jobId' in output && output.jobId) {
                   const jobId = String(output.jobId);
                   const taskType = String((output as Record<string, unknown>)['taskType'] ?? 'unknown');
-                  const event = JSON.stringify({ type: 'agent-network-job', jobId, taskType }) + '\n';
+                  const event = JSON.stringify({ type: 'workflow-job', jobId, taskType }) + '\n';
                   controller.enqueue(encoder.encode(event));
                   console.log(`📡 workflow-jobイベントを送信: ${jobId}`);
                 }

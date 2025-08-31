@@ -1,5 +1,4 @@
 // 既存ツールをレジストリにまとめ、役割ごとの注入選択を容易にする
-import { agentNetworkTool } from '../tools/agent-network-tool';
 import { slidePreviewTool } from '../tools/slide-preview-tool';
 import { jobStatusTool } from '../tools/job-status-tool';
 import { jobResultTool } from '../tools/job-result-tool';
@@ -21,7 +20,6 @@ import { workflowOrchestratorTool } from '../tools/workflow-orchestrator-tool';
 export type ToolId = keyof typeof toolRegistry;
 
 export const toolRegistry = {
-  agentNetworkTool,
   workflowOrchestratorTool,
   slidePreviewTool,
   jobStatusTool,
@@ -46,8 +44,7 @@ export function getToolsForRole(role: AgentRole): Record<string, unknown> {
   switch (role) {
     case 'GENERAL':
       return {
-        // デフォルトでは両方登録しておき、動的に切り替える
-        agentNetworkTool,
+        // デフォルトではワークフロー実行のみを公開
         workflowOrchestratorTool,
         slidePreviewTool,
         jobStatusTool,

@@ -815,12 +815,6 @@ export default function ChatPage() {
               case 'tool-execution':
                 console.log(`🔧 ツール実行検出: ${event.toolName}`);
                 executedTools.push(event.toolName);
-                
-                // agent-network-executorツールの実行を検出（ログのみ）
-                if (event.toolName === 'agent-network-executor' || event.toolName === 'agentNetworkTool') {
-                  console.log(`🤖 エージェントネットワークツール実行検出 (${event.toolName})`);
-                  console.log(`🤖 引数:`, event.args);
-                }
                 break;
                 
               case 'slide-preview-ready':
@@ -828,32 +822,9 @@ export default function ChatPage() {
                 slidePreviewJobId = event.jobId;
                 break;
                 
-              case 'agent-network-job':
-                console.log(`🤖 エージェントネットワークジョブ検出: ${event.jobId}`);
-                console.log(`🤖 タスクタイプ: ${event.taskType}`);
-                
-                // ジョブデータを作成（自動ポップアップはしない）
-                console.log(`🔴 エージェントネットワークジョブ検出: ${event.jobId}`);
-                setActiveJobs(prev => {
-                  const newMap = new Map(prev);
-                  newMap.set(event.jobId, {
-                    jobId: event.jobId,
-                    taskType: event.taskType || 'unknown',
-                    status: 'running',
-                    startTime: new Date(),
-                    realtimeConversations: [],
-                    connectionStatus: 'disconnected'
-                  });
-                  return newMap;
-                });
-                
-                // モーダルが開いていてリアルタイムモードの場合、自動的にSSE接続を開始
-                if (showAgentLogs && isRealTimeMode) {
-                  console.log(`🔴 モーダルが開いているため、新しいジョブのSSE接続を自動開始: ${event.jobId}`);
-                  // setTimeoutを使わずに直接実行
-                  startRealtimeLogStreaming(event.jobId);
-                }
-                break;
+              // ネットワークジョブイベントは廃止
+              // case 'agent-network-job':
+              //   break;
                 
               case 'message-complete':
                 console.log('📝 メッセージ完了:', event);
@@ -933,11 +904,9 @@ export default function ChatPage() {
                 <label className="text-sm">モード</label>
                 <select
                   className="bg-transparent outline-none text-sm"
-                  value={toolMode}
-                  onChange={(e) => setToolMode(e.target.value as 'network'|'workflow'|'both')}
+                  value={'workflow'}
+                  onChange={() => { /* no-op: ネットワークは廃止 */ }}
                 >
-                  <option value="both">両方</option>
-                  <option value="network">ネットワーク</option>
                   <option value="workflow">ワークフロー</option>
                 </select>
               </div>
