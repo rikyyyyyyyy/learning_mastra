@@ -822,7 +822,6 @@ export default function ChatPage() {
           message: inputValue,
           threadId: threadIdRef.current, // threadIdを送信
           model: selectedModel, // 選択されたモデルを送信
-          toolMode,
           modelOptions: (() => {
             const current = models.find(m => m.key === selectedModel);
             const supportsReasoning = !!current?.info.capabilities?.reasoning;

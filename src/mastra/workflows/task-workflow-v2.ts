@@ -4,7 +4,7 @@ import { RuntimeContext } from '@mastra/core/di';
 import { createRoleAgent } from '../agents/factory';
 import { agentLogStore, formatAgentMessage } from '../utils/agent-log-store';
 import { extractSystemContext } from '../utils/shared-context';
-import { buildWorkerPoolNetwork, generateWithWorkerNetwork } from '../networks/worker-network-vNext';
+import { buildWorkerPoolNetworkFromDB, generateWithWorkerNetwork } from '../networks/worker-network-vNext';
 
 const TaskTypeEnum = z.enum(['web-search', 'slide-generation', 'weather', 'other']);
 
@@ -109,7 +109,7 @@ export const ceoManagerWorkerWorkflow = createWorkflow({
 
         const systemContext = extractSystemContext(rc) || undefined;
         const manager = createRoleAgent({ role: 'MANAGER', modelKey: selectedModel, systemContext });
-        const workerNet = buildWorkerPoolNetwork({ id: `${jobId}:workers`, modelKey: selectedModel, systemContext });
+        const workerNet = await buildWorkerPoolNetworkFromDB({ id: `${jobId}:workers`, modelKey: selectedModel, systemContext });
 
         // ループ条件: DBに queued/running の小タスクがある、または pending 指示がある間
         // 安全装置として最大50サイクルだが、制御はDB状態で決まる（非決定的）

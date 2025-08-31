@@ -6,6 +6,7 @@ import { sharedMemory } from '../shared-memory';
 import { createSearchWorkerAgent } from '../agents/network/workers/search-worker-agent';
 import { createCodeWorkerAgent } from '../agents/network/workers/code-worker-agent';
 import { createWorkerAgent } from '../agents/network/worker-agent';
+import { createWorkerFromDefinition, WorkerMetadata } from '../agents/worker-factory';
 
 export interface WorkerPoolOptions {
   id: string;
@@ -22,6 +23,7 @@ export function buildWorkerPoolNetwork(opts: WorkerPoolOptions): NewAgentNetwork
     ? resolveModelWithOptions(modelKey, modelOptions)
     : resolveModel(modelKey);
 
+  // フォールバック（DB未連携時）
   const agents: Record<string, Agent> = {
     search: createSearchWorkerAgent(modelKey, systemContext, modelOptions, memory),
     code: createCodeWorkerAgent(modelKey, systemContext, modelOptions, memory),
@@ -50,6 +52,53 @@ export function buildWorkerPoolNetwork(opts: WorkerPoolOptions): NewAgentNetwork
     model: ((() => aiModel) as unknown) as never,
     agents,
     defaultAgent: agents.general,
+    memory: ((() => (memory ?? sharedMemory)) as unknown) as never,
+  });
+}
+
+// DBからWORKER定義を読み込み、ネットワークを構成する非同期ビルダー
+export async function buildWorkerPoolNetworkFromDB(opts: WorkerPoolOptions & { modelOptions?: Record<string, unknown> }): Promise<NewAgentNetwork> {
+  const { id, name, modelKey = 'claude-sonnet-4', systemContext, modelOptions, memory } = opts;
+  const { aiModel } = modelOptions
+    ? resolveModelWithOptions(modelKey, modelOptions)
+    : resolveModel(modelKey);
+
+  let agentMap: Record<string, Agent> = {};
+  try {
+    // DBが初期化済みである前提（ワークフロー前段のステップで初期化済み）
+    const { getDAOs } = await import('../task-management/db/dao');
+    const { agentDefinitions } = getDAOs();
+    const all = await agentDefinitions.findAll();
+    const workers = all.filter(a => a.role === 'WORKER' && a.enabled);
+    if (workers.length > 0) {
+      workers.forEach((w, idx) => {
+        const agent = createWorkerFromDefinition({ id: w.id, name: w.name, model_key: w.model_key, prompt_text: w.prompt_text, metadata: w.metadata as unknown as WorkerMetadata }, modelOptions);
+        agentMap[w.id || `worker-${idx+1}`] = agent;
+      });
+    }
+  } catch {
+    // 失敗時はフォールバック（静的）
+  }
+
+  if (Object.keys(agentMap).length === 0) {
+    agentMap = {
+      default: createWorkerAgent(modelKey, systemContext),
+    } as const;
+  }
+
+  return new NewAgentNetwork({
+    id,
+    name: name || 'Worker Pool Network',
+    instructions: `
+あなたは小タスクを実行するエージェントネットワークです。登録されたワーカーから自動的に最適な担当を選択して実行してください。
+
+【ツール入力の重要ルール】
+すべてのツール入力は必ず JSON オブジェクト（辞書）で与える（例: exa-mcp-search => {"query":"...","numResults":5}）。
+文字列単体や配列を直接渡してはならない。
+`,
+    model: ((() => aiModel) as unknown) as never,
+    agents: agentMap,
+    defaultAgent: agentMap[Object.keys(agentMap)[0]],
     memory: ((() => (memory ?? sharedMemory)) as unknown) as never,
   });
 }
@@ -98,4 +147,3 @@ export async function generateWithWorkerNetwork(
   ], { memory: { thread: options?.thread, resource: options?.resource }, runtimeContext: options?.runtimeContext });
   return text as string;
 }
-

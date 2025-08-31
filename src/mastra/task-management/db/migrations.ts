@@ -24,6 +24,9 @@ export class TaskManagementDB {
       // Run migrations
       await this.runMigrations();
       
+      // Seed default workers if not present
+      await this.seedDefaultWorkers();
+
       console.log('✅ Task management database initialized successfully');
     } catch (error) {
       console.error('❌ Failed to initialize task management database:', error);
@@ -67,6 +70,37 @@ export class TaskManagementDB {
         console.error(`✗ Migration failed for ${migration.name}:`, error);
         throw error;
       }
+    }
+  }
+
+  private async seedDefaultWorkers(): Promise<void> {
+    try {
+      // create default search/code workers if missing
+      const now = new Date().toISOString();
+      const defaults = [
+        {
+          id: 'worker-search-default',
+          name: 'Search Worker (default)',
+          metadata: JSON.stringify({ mcp: { exa: { enabled: true } } }),
+        },
+        {
+          id: 'worker-code-default',
+          name: 'Code Worker (default)',
+          metadata: JSON.stringify({ mcp: { exa: { enabled: false } } }),
+        },
+      ];
+
+      for (const def of defaults) {
+        await this.db.execute({
+          sql:
+            `INSERT INTO agent_definitions (id, name, role, model_key, prompt_text, enabled, tools, metadata, updated_at)\n` +
+            `VALUES (?, ?, 'WORKER', NULL, NULL, 1, NULL, ?, ?)\n` +
+            `ON CONFLICT(id) DO NOTHING`,
+          args: [def.id, def.name, def.metadata, now],
+        });
+      }
+    } catch (e) {
+      console.warn('⚠️ seeding default workers failed:', e);
     }
   }
 

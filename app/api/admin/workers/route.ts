@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDAOs } from '@/src/mastra/task-management/db/dao';
 import { ensureTaskDBInitialized } from '@/src/mastra/task-management/db/init';
-import { getToolsForRole } from '@/src/mastra/config/tool-registry';
+import { getDAOs } from '@/src/mastra/task-management/db/dao';
 
 export async function GET(req: NextRequest) {
   await ensureTaskDBInitialized();
@@ -9,49 +8,44 @@ export async function GET(req: NextRequest) {
   const id = searchParams.get('id');
   const includeBuiltin = searchParams.get('includeBuiltin') === 'true';
   const { agentDefinitions } = getDAOs();
+
   if (id) {
     const one = await agentDefinitions.findById(id);
-    if (!one) return NextResponse.json({ error: 'not found' }, { status: 404 });
+    if (!one || one.role !== 'WORKER') return NextResponse.json({ error: 'not found' }, { status: 404 });
     return NextResponse.json(one);
   }
-  const defs = await agentDefinitions.findAll();
-  if (!includeBuiltin) return NextResponse.json(defs);
-  // 既定（コード内）エージェントも合算
-  const builtin = [
-    { id: 'ceo-agent', name: 'CEO Agent - Strategic Task Director', role: 'CEO' as const },
-    { id: 'manager-agent', name: 'Manager Agent - Task Planner & Coordinator', role: 'MANAGER' as const },
-    { id: 'worker-agent', name: 'Worker Agent - Task Executor', role: 'WORKER' as const },
-  ].map(b => {
-    const toolsObj = getToolsForRole(b.role);
-    const toolKeys = Object.keys(toolsObj);
-    return {
-      id: b.id,
-      name: b.name,
-      role: b.role,
-      model_key: undefined,
-      prompt_text: undefined,
-      enabled: true,
-      tools: toolKeys,
-      metadata: undefined,
-      updated_at: new Date().toISOString(),
-    };
-  });
-  return NextResponse.json([...builtin, ...defs]);
+
+  const all = await agentDefinitions.findAll();
+  const workers = all.filter((a) => a.role === 'WORKER');
+  if (!includeBuiltin) return NextResponse.json(workers);
+  const builtin = [{
+    id: 'worker-default',
+    name: 'Default Worker (built-in)',
+    role: 'WORKER' as const,
+    model_key: undefined,
+    prompt_text: undefined,
+    enabled: true,
+    tools: undefined,
+    metadata: undefined,
+    updated_at: new Date().toISOString(),
+  }];
+  return NextResponse.json([...builtin, ...workers]);
 }
 
 export async function POST(req: NextRequest) {
   await ensureTaskDBInitialized();
   const body = await req.json();
   const { agentDefinitions } = getDAOs();
+  const genId = () => `worker-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
   const saved = await agentDefinitions.upsert({
-    id: body.id,
+    id: body.id || genId(),
     name: body.name,
-    role: body.role,
-    model_key: body.model_key,
+    role: 'WORKER',
+    model_key: undefined, // モデルはUIで設定不可
     prompt_text: body.prompt_text,
     enabled: !!body.enabled,
-    tools: body.tools,
-    metadata: body.metadata,
+    tools: undefined, // 任意ツールは扱わない（必須はランタイム注入）
+    metadata: body.metadata ?? undefined,
   });
   return NextResponse.json(saved);
 }
@@ -63,12 +57,12 @@ export async function PATCH(req: NextRequest) {
   const saved = await agentDefinitions.upsert({
     id: body.id,
     name: body.name,
-    role: body.role,
-    model_key: body.model_key,
+    role: 'WORKER',
+    model_key: undefined,
     prompt_text: body.prompt_text,
     enabled: !!body.enabled,
-    tools: body.tools,
-    metadata: body.metadata,
+    tools: undefined,
+    metadata: body.metadata ?? undefined,
   });
   return NextResponse.json(saved);
 }
@@ -79,6 +73,8 @@ export async function DELETE(req: NextRequest) {
   const id = searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
   const { agentDefinitions } = getDAOs();
+  const one = await agentDefinitions.findById(id);
+  if (!one || one.role !== 'WORKER') return NextResponse.json({ error: 'not found' }, { status: 404 });
   await agentDefinitions.delete(id);
   return NextResponse.json({ success: true });
 }

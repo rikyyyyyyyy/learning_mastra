@@ -7,8 +7,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <span className="text-xs text-gray-500 dark:text-gray-400">設定を編集して保存すると即時反映されます</span>
         </div>
         <nav className="px-4 py-3 flex flex-wrap gap-2 text-sm">
-          <a className="px-3 py-1.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-200 dark:border-purple-900/50" href="/protected/admin/agents">エージェント定義</a>
-          <a className="px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-900/50" href="/protected/admin/networks">ネットワーク定義</a>
+          <a className="px-3 py-1.5 rounded-full border hover:opacity-90 bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-800/60 dark:text-white dark:border-indigo-700" href="/protected/admin/workers">ワーカー管理</a>
+          <a className="px-3 py-1.5 rounded-full border hover:opacity-90 bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-800/60 dark:text-white dark:border-emerald-700" href="/protected/admin/env">環境変数</a>
         </nav>
       </div>
       <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm p-4 md:p-6">
@@ -17,4 +17,3 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     </div>
   );
 }
-

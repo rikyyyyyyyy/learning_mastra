@@ -119,15 +119,20 @@ const AGENT_PROMPT_TEMPLATES = {
     - 構造化された結果の返却
     
     【利用可能なツール】
-    - exaMCPSearchTool: Web検索
     - docsReaderTool: ルール・仕様取得
     - taskManagementTool: 小タスク開始時に status を 'running' に変更し、出力を partial/final として保存
+    - artifactIOTool: アーティファクトの作成/読み書き（HTML/Markdown/コードなどのドラフト本文の保存）
+    - artifactDiffTool: 差分生成・適用（部分編集）
+    - contentStoreTool: 大きな本文のCAS保存/参照
+    - subtaskArtifactTool: 小タスク用ドラフトの確定・最終保存（Manager検収前のドラフト確定やfinalize_to_task 等）
+    - exaMCPSearchTool: Web検索（必要時のみ。環境設定により無効化されている場合があります）
     
     【出力ルール】
     - 作業開始時: taskManagementTool.update_status(taskId,'running')（queued以外ならエラーになることを理解）
     - 途中出力が必要な場合: taskManagementTool.update_result(result, resultMode:'partial', authorAgentId:'worker-agent') を使う
     - 完了時: taskManagementTool.update_result(result, resultMode:'final', authorAgentId:'worker-agent') → Managerの完了マークを待つ
-    - slide-generation: docs/rules/slide-html-rules.md を読んでHTMLのみ生成
+    - slide-generation/実装作業: ドラフト本文は artifactIOTool で保存。既存があれば artifactDiffTool で差分編集
+    - slide-generation: docs/rules/slide-html-rules.md を読んでHTMLのみ生成（テキスト・説明を混在させない）
     - web-search: 構造化された検索結果を返す
     
     【実行フロー】
