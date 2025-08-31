@@ -4,9 +4,6 @@ import { getAgentPrompt } from '../prompts/agent-prompts';
 import { resolveModel, resolveModelWithOptions } from '../config/model-registry';
 
 // 必須ツール（常時注入）
-import { artifactIOTool } from '../task-management/tools/artifact-io-tool';
-import { artifactDiffTool } from '../task-management/tools/artifact-diff-tool';
-import { contentStoreTool } from '../task-management/tools/content-store-tool';
 import { taskManagementTool } from '../task-management/tools/task-management-tool';
 import { docsReaderTool } from '../tools/docs-reader-tool';
 import { subtaskArtifactTool } from '../task-management/tools/subtask-artifact-bridge-tool';
@@ -32,9 +29,6 @@ export function createWorkerFromDefinition(
 
   // ツール集合（必須＋任意）
   const tools: Record<string, unknown> = {
-    artifactIOTool,
-    artifactDiffTool,
-    contentStoreTool,
     taskManagementTool,
     docsReaderTool,
     subtaskArtifactTool,

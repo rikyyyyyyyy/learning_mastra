@@ -37,7 +37,7 @@ export function buildWorkerPoolNetwork(opts: WorkerPoolOptions): NewAgentNetwork
 あなたは小タスクを実行するエージェントネットワークです。以下のエージェントから最適な担当を選んで実行してください。
 
 - search: Web/論文/リファレンスの検索・要約。ツール: exa-mcp-search, docs-reader
-- code: 成果物の作成/編集（HTML/Markdown/コード）。ツール: artifact-io, artifact-diff, content-store
+- code: 成果物の作成/編集（HTML/Markdown/コード）。ツール: subtask-artifact（ensure/commit/diff/edits/finalize）, task-management
 - general: 上記に当てはまらない汎用作業
 
 【ルーティング規則（厳守）】

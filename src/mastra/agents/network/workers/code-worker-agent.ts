@@ -4,10 +4,8 @@ import { getAgentPrompt } from '../../../prompts/agent-prompts';
 import { resolveModel, resolveModelWithOptions } from '../../../config/model-registry';
 import { SystemContext } from '../../../utils/shared-context';
 
-// Tools more suitable for code/artifact work
-import { artifactIOTool } from '../../../task-management/tools/artifact-io-tool';
-import { artifactDiffTool } from '../../../task-management/tools/artifact-diff-tool';
-import { contentStoreTool } from '../../../task-management/tools/content-store-tool';
+// Tools for code/artifact workflow
+import { subtaskArtifactTool } from '../../../task-management/tools/subtask-artifact-bridge-tool';
 import { taskManagementTool } from '../../../task-management/tools/task-management-tool';
 import { docsReaderTool } from '../../../tools/docs-reader-tool';
 
@@ -26,9 +24,7 @@ export function createCodeWorkerAgent(
     instructions: getAgentPrompt('WORKER', systemContext),
     model: aiModel,
     tools: {
-      artifactIOTool,
-      artifactDiffTool,
-      contentStoreTool,
+      subtaskArtifactTool,
       taskManagementTool,
       docsReaderTool,
     } as unknown as never,
