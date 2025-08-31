@@ -33,7 +33,7 @@ export function createRoleAgent(options: AgentFactoryOptions): Agent {
     instructions: getAgentPrompt(role, systemContext),
     model: aiModel as AnyModel,
     tools: getToolsForRole(role) as unknown as never,
-    memory: memory ?? sharedMemory,
+    memory: ((() => (memory ?? sharedMemory)) as unknown) as never,
   });
 
   // デバッグ用モデル情報を付与（既存運用の互換）
@@ -80,7 +80,7 @@ export function createAgentFromDefinition(def: AgentDefinitionInput, modelOption
     instructions,
     model: aiModel as AnyModel,
     tools: tools as unknown as never,
-    memory: def.memory ?? sharedMemory,
+    memory: ((() => (def.memory ?? sharedMemory)) as unknown) as never,
   });
 
   (agent as { _modelInfo?: { provider: string; modelId: string; displayName: string } })._modelInfo = info;

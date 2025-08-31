@@ -38,11 +38,9 @@ ${instructions}
 - 全ツールはJSONオブジェクト入力のみ
 - ツールがエラーを返したら再試行せず、エラーコードに従って正しい役割へルーティング
 `,
-    model,
+    model: ((() => model) as unknown) as never,
     agents,
     defaultAgent,
-    memory: memory
-      ? ((() => memory) as unknown as never)
-      : undefined,
+    memory: memory ? (((() => memory) as unknown) as never) : undefined,
   });
 }

@@ -11,6 +11,7 @@ import { batchTaskCreationTool } from '../task-management/tools/batch-task-creat
 import { policyCheckTool } from '../task-management/tools/policy-management-tool';
 import { policyManagementTool } from '../task-management/tools/policy-management-tool';
 import { taskViewerTool } from '../task-management/tools/task-viewer-tool';
+import { subtaskArtifactTool } from '../task-management/tools/subtask-artifact-bridge-tool';
 import { finalResultTool } from '../task-management/tools/final-result-tool';
 // Worker向け
 import { exaMCPSearchTool } from '../tools/exa-search-wrapper';
@@ -59,7 +60,7 @@ export function getToolsForRole(role: AgentRole): Record<string, unknown> {
       return {
         taskViewerTool,
         policyManagementTool,
-        // finalResultTool は削除（ワークフローのコードから直接呼び出すため）
+        finalResultTool,
         docsReaderTool,
       };
     case 'MANAGER':
@@ -68,6 +69,7 @@ export function getToolsForRole(role: AgentRole): Record<string, unknown> {
         batchTaskCreationTool,
         directiveManagementTool,
         policyCheckTool,
+        subtaskArtifactTool,
         docsReaderTool,
       };
     case 'WORKER':
@@ -76,6 +78,7 @@ export function getToolsForRole(role: AgentRole): Record<string, unknown> {
         docsReaderTool,
         // Workerもタスク状態・結果を直接更新できる（running/partial等）
         taskManagementTool,
+        subtaskArtifactTool,
       };
     default:
       return {};

@@ -42,6 +42,11 @@ export const exaMCPSearchTool = createTool({
   }),
   execute: async ({ context, mastra, runtimeContext }) => {
     const { query, numResults, searchType } = context;
+    if (!process.env.EXA_API_KEY) {
+      const msg = 'EXA_API_KEY is not set. Set it in .env.local to enable Exa MCP search.';
+      console.error('❌', msg);
+      return { searchResults: JSON.stringify({ error: msg }), success: false };
+    }
     
     try {
       console.log(`🔍 Exa MCPツールで${searchType}検索を実行: "${query}"`);
@@ -49,39 +54,32 @@ export const exaMCPSearchTool = createTool({
       // MCPツールを取得
       const tools = await getMCPTools();
       
-      // 検索タイプに基づいてツールを選択
+      // 検索タイプに基づいてツールを選択（名称差異に強い柔軟一致）
+      const names = Object.keys(tools);
+      const findBy = (re: RegExp, exclude?: RegExp) =>
+        names.find((n) => re.test(n) && (!exclude || !exclude.test(n)));
+
       let targetToolName: string | undefined;
-      
       switch (searchType) {
         case 'web':
-          targetToolName = Object.keys(tools).find(name => 
-            name.includes('web_search_exa') && !name.includes('wikipedia')
-          );
+          targetToolName =
+            findBy(/web.*search|search.*web|exa.*search|search/i, /wiki/i) ||
+            findBy(/search/i, /wiki/i);
           break;
         case 'research_paper':
-          targetToolName = Object.keys(tools).find(name => 
-            name.includes('research_paper_search')
-          );
+          targetToolName = findBy(/paper|arxiv|research.*paper/i) || findBy(/research/i);
           break;
         case 'github':
-          targetToolName = Object.keys(tools).find(name => 
-            name.includes('github_search')
-          );
+          targetToolName = findBy(/github/i);
           break;
         case 'company':
-          targetToolName = Object.keys(tools).find(name => 
-            name.includes('company_research')
-          );
+          targetToolName = findBy(/company|crunchbase|clearbit/i) || findBy(/research/i);
           break;
         case 'linkedin':
-          targetToolName = Object.keys(tools).find(name => 
-            name.includes('linkedin_search')
-          );
+          targetToolName = findBy(/linkedin/i);
           break;
         case 'wikipedia':
-          targetToolName = Object.keys(tools).find(name => 
-            name.includes('wikipedia_search_exa')
-          );
+          targetToolName = findBy(/wikipedia|wiki/i);
           break;
       }
       
@@ -104,17 +102,15 @@ export const exaMCPSearchTool = createTool({
         searchType,
       });
       
-      // Exaツールのパラメータ名に合わせて調整
+      // Exaツールのパラメータ名に合わせて調整（互換キーを同時に渡す）
       const toolParams: Record<string, unknown> = {
         query,
+        numResults,
+        num_results: numResults,
+        count: numResults,
+        limit: numResults,
+        type: searchType,
       };
-      
-      // numResultsパラメータ名の調整（ツールによって異なる可能性）
-      if (searchType === 'web') {
-        toolParams.num_results = numResults;
-      } else {
-        toolParams.numResults = numResults;
-      }
       
       const searchResult = await searchTool.execute({
         context: toolParams,

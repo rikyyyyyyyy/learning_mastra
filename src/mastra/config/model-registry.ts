@@ -71,7 +71,7 @@ export function resolveModel(modelType?: string): ResolvedModel {
 
   switch (def.provider) {
     case 'OpenAI':
-      return { aiModel: openai(def.modelId, def.options as any), info: { ...def, key } };
+      return { aiModel: openai(def.modelId), info: { ...def, key } };
     case 'Google':
       return { aiModel: google(def.modelId) as unknown as AnyModel, info: { ...def, key } };
     case 'Anthropic':
@@ -100,7 +100,8 @@ export function resolveModelWithOptions(
 
   switch (def.provider) {
     case 'OpenAI':
-      return { aiModel: openai(def.modelId, mergedOptions), info: { ...def, key } };
+      // openai() にはモデルIDのみを渡す。オプションは生成時に利用する想定。
+      return { aiModel: openai(def.modelId), info: { ...def, key } };
     case 'Google':
       return { aiModel: google(def.modelId) as unknown as AnyModel, info: { ...def, key } };
     case 'Anthropic':

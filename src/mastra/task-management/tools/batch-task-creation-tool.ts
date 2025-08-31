@@ -84,39 +84,60 @@ export const batchTaskCreationTool = createTool({
       }
       const daos = getDAOs();
       
-      // 既存タスクのチェック - 同じネットワークIDで既にタスクが存在する場合は重複を避ける
+      // 既存タスクのチェックとステップ番号の正規化
       const existingTasks = await daos.tasks.findByNetworkId(networkId);
-      if (existingTasks.length > 0) {
-        // ステップ番号重複を避ける（null はメインタスクなので除外して保持）
-        const existingSteps = new Set<number>(
-          existingTasks
-            .map(t => t.step_number)
-            .filter((s): s is number => typeof s === 'number')
-        );
+      const existingSteps = new Set<number>(
+        existingTasks
+          .map(t => t.step_number)
+          .filter((s): s is number => typeof s === 'number')
+      );
 
-        // 既存と重複する stepNumber を除外
-        const filtered = tasks.filter(t => {
-          const sn = t.stepNumber;
-          if (typeof sn === 'number' && existingSteps.has(sn)) return false;
-          return true;
-        });
+      // 入力配列内の重複や既存と衝突する stepNumber を再割当て（欠番は許容）
+      const usedSteps = new Set<number>(existingSteps);
+      const maxExisting = existingTasks
+        .map(t => (typeof t.step_number === 'number' ? t.step_number : 0))
+        .reduce((a, b) => Math.max(a, b), 0);
+      let nextStep = Math.max(1, maxExisting + 1);
 
-        if (filtered.length === 0) {
-          console.log(`ℹ️ All tasks already exist or conflict for network ${networkId}. Skipping creation.`);
-          return {
-            success: true,
-            createdTasks: existingTasks
-              .filter(t => typeof t.step_number === 'number')
-              .map(t => ({ taskId: t.task_id, taskType: t.task_type, stepNumber: t.step_number })),
-            networkId,
-            totalTasks: existingTasks.filter(t => typeof t.step_number === 'number').length,
-            message: `Using existing tasks for network ${networkId}`,
-          };
+      let collisions = 0;
+      const normalized = tasks.map((t, i) => {
+        let desired = typeof t.stepNumber === 'number' ? t.stepNumber : i + 1;
+        if (desired < 1) desired = 1;
+        if (usedSteps.has(desired)) {
+          collisions++;
+          while (usedSteps.has(nextStep)) nextStep++;
+          desired = nextStep;
+          usedSteps.add(desired);
+          nextStep++;
+        } else {
+          usedSteps.add(desired);
         }
+        return { ...t, stepNumber: desired };
+      });
 
-        console.log(`📝 Creating ${filtered.length} new tasks (${tasks.length - filtered.length} skipped for duplication/conflict)`);
-        tasks.splice(0, tasks.length, ...filtered);
+      if (collisions > 0) {
+        console.log(`🔁 Resolved ${collisions} step conflicts by renumbering (start from ${maxExisting + 1}).`);
       }
+
+      // 既存と完全重複（同じ説明・同じstep）の重複を最終除外
+      const existingKey = new Set(existingTasks.filter(t => typeof t.step_number === 'number').map(t => `${t.step_number}|${t.task_description}`));
+      const finalTasks = normalized.filter(t => !existingKey.has(`${t.stepNumber}|${t.taskDescription}`));
+
+      if (finalTasks.length === 0) {
+        console.log(`ℹ️ All tasks already exist for network ${networkId}. Skipping creation.`);
+        return {
+          success: true,
+          createdTasks: existingTasks
+            .filter(t => typeof t.step_number === 'number')
+            .map(t => ({ taskId: t.task_id, taskType: t.task_type, stepNumber: t.step_number })),
+          networkId,
+          totalTasks: existingTasks.filter(t => typeof t.step_number === 'number').length,
+          message: `Using existing tasks for network ${networkId}`,
+        };
+      }
+
+      console.log(`📝 Creating ${finalTasks.length} new tasks (${tasks.length - finalTasks.length} skipped or renumbered)`);
+      tasks.splice(0, tasks.length, ...finalTasks);
       
       // Ensure response time < 100ms by using setTimeout for actual creation
       const createdTaskIds: Array<{ taskId: string; taskType: string; stepNumber?: number }> = [];
@@ -126,11 +147,12 @@ export const batchTaskCreationTool = createTool({
       const timestamp = Date.now();
       const taskDataList = tasks.map((task, index) => {
         // より確実にユニークなIDを生成（タイムスタンプ + インデックス + ランダム文字列）
-        const taskId = `task-${networkId}-s${task.stepNumber || index + 1}-${timestamp}-${index.toString().padStart(3, '0')}-${Math.random().toString(36).substring(2, 8)}`;
+        const stepNo = task.stepNumber || index + 1;
+        const taskId = `task-${networkId}-s${stepNo}-${timestamp}-${index.toString().padStart(3, '0')}-${Math.random().toString(36).substring(2, 8)}`;
         createdTaskIds.push({ 
           taskId, 
           taskType: task.taskType,
-          stepNumber: task.stepNumber || index + 1
+          stepNumber: stepNo
         });
         
         return {
@@ -144,7 +166,7 @@ export const batchTaskCreationTool = createTool({
           task_parameters: task.taskParameters,
           progress: 0,
           created_by: 'manager-agent',
-          step_number: task.stepNumber || index + 1,
+          step_number: stepNo,
           depends_on: task.dependsOn,
           metadata: {
             ...task.metadata,
