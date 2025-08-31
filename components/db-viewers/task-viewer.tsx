@@ -254,7 +254,7 @@ export function TaskViewer({ networkId }: { networkId?: string }) {
                   </div>
                   
                   <div className="ml-10">
-                    <p className="text-sm text-muted-foreground mb-2">{task.task_description}</p>
+                    <p className="text-sm text-muted-foreground mb-2 break-words">{task.task_description}</p>
                     
                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
                       <span>作成: {formatDate(task.created_at)}</span>
@@ -307,7 +307,7 @@ export function TaskViewer({ networkId }: { networkId?: string }) {
                     {typeof task.task_parameters !== 'undefined' && (
                       <div>
                         <span className="font-medium text-sm">パラメータ:</span>
-                        <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto">
+                        <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto whitespace-pre-wrap break-words">
                           {JSON.stringify(task.task_parameters, null, 2)}
                         </pre>
                       </div>
@@ -316,7 +316,7 @@ export function TaskViewer({ networkId }: { networkId?: string }) {
                     {typeof task.task_result !== 'undefined' && (
                       <div>
                         <span className="font-medium text-sm">結果:</span>
-                        <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto max-h-48 overflow-y-auto">
+                        <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-words">
                           {typeof task.task_result === 'string' ? task.task_result : JSON.stringify(task.task_result, null, 2)}
                         </pre>
                       </div>
@@ -325,7 +325,7 @@ export function TaskViewer({ networkId }: { networkId?: string }) {
                     {task.metadata && Object.keys(task.metadata).length > 0 && (
                       <div>
                         <span className="font-medium text-sm">メタデータ:</span>
-                        <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto">
+                        <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto whitespace-pre-wrap break-words">
                           {JSON.stringify(task.metadata, null, 2)}
                         </pre>
                       </div>

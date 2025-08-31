@@ -506,7 +506,7 @@ export function NetworkTaskViewer() {
                                     {/* 小タスクでは優先度と担当者の表示は不要 */}
                                   </div>
                                 
-                                <p className="text-sm text-muted-foreground mb-1">
+                                <p className="text-sm text-muted-foreground mb-1 break-words">
                                   {task.task_description}
                                 </p>
                                 
@@ -547,7 +547,7 @@ export function NetworkTaskViewer() {
                                   {task.task_result ? (
                                     <>
                                       <div className="font-medium text-sm mb-2">タスク結果:</div>
-                                      <pre className="text-xs bg-background p-2 rounded border overflow-x-auto max-h-48 overflow-y-auto">
+                                      <pre className="text-xs bg-background p-2 rounded border overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-words">
                                         {typeof task.task_result === 'string' 
                                           ? task.task_result 
                                           : JSON.stringify(task.task_result, null, 2)}
@@ -568,7 +568,7 @@ export function NetworkTaskViewer() {
                                   {task.metadata && Object.keys(task.metadata).length > 0 && (
                                     <div className="mt-2">
                                       <span className="font-medium text-sm">メタデータ:</span>
-                                      <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto">
+                                      <pre className="text-xs mt-1 p-2 bg-background rounded border overflow-x-auto whitespace-pre-wrap break-words">
                                         {JSON.stringify(task.metadata, null, 2)}
                                       </pre>
                                     </div>
@@ -577,7 +577,7 @@ export function NetworkTaskViewer() {
                                   {task.depends_on && task.depends_on.length > 0 && (
                                     <div className="mt-2">
                                       <span className="font-medium text-sm">依存タスク:</span>
-                                      <div className="text-xs text-muted-foreground mt-1">
+                                      <div className="text-xs text-muted-foreground mt-1 break-words">
                                         {task.depends_on.join(', ')}
                                       </div>
                                     </div>

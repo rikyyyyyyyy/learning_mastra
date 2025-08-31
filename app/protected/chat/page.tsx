@@ -75,7 +75,6 @@ export default function ChatPage() {
   const [models, setModels] = useState<RegistryModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("claude-sonnet-4");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
-  const [toolMode, setToolMode] = useState<'network'|'workflow'|'both'>('both');
   // Reasoning UI state
   const [reasoningEnabled, setReasoningEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<'low'|'medium'|'high'>('medium');
@@ -451,6 +450,58 @@ export default function ChatPage() {
     setTotalSlides(0);
   };
 
+  // プレビュー領域にスライド内容をフィット（iframe内部をスケール）
+  const fitSlideIframe = () => {
+    const iframeEl = iframeRef.current as HTMLIFrameElement | null;
+    const parent = iframeEl?.parentElement as HTMLElement | null;
+    const doc = iframeEl?.contentDocument as Document | null;
+    if (!iframeEl || !parent || !doc) return;
+    const html = doc.documentElement as HTMLElement;
+    const body = doc.body as HTMLElement;
+
+    // 100%レイアウトで中央寄せ
+    html.style.width = '100%';
+    html.style.height = '100%';
+    html.style.margin = '0';
+    body.style.width = '100%';
+    body.style.height = '100%';
+    body.style.margin = '0';
+    body.style.overflow = 'hidden';
+    body.style.position = 'relative';
+
+    // ラッパー生成（初回のみ）
+    let wrapper = doc.getElementById('slide-fit-wrapper') as HTMLElement | null;
+    if (!wrapper) {
+      wrapper = doc.createElement('div');
+      wrapper.id = 'slide-fit-wrapper';
+      // 既存の子要素をすべて wrapper に移動
+      while (body.firstChild) wrapper.appendChild(body.firstChild);
+      body.appendChild(wrapper);
+      wrapper.style.transformOrigin = 'top left';
+      wrapper.style.willChange = 'transform';
+      wrapper.style.position = 'absolute';
+      wrapper.style.top = '0';
+      wrapper.style.left = '0';
+      // 元の自然サイズを保存
+      const naturalWidth = Math.max(wrapper.scrollWidth, wrapper.offsetWidth, 1);
+      const naturalHeight = Math.max(wrapper.scrollHeight, wrapper.offsetHeight, 1);
+      wrapper.dataset.naturalWidth = String(naturalWidth);
+      wrapper.dataset.naturalHeight = String(naturalHeight);
+      wrapper.style.width = naturalWidth + 'px';
+      wrapper.style.height = naturalHeight + 'px';
+    }
+
+    const naturalWidth = Number(wrapper.dataset.naturalWidth || Math.max(wrapper.scrollWidth, wrapper.offsetWidth, 1));
+    const naturalHeight = Number(wrapper.dataset.naturalHeight || Math.max(wrapper.scrollHeight, wrapper.offsetHeight, 1));
+
+    const availWidth = parent.clientWidth;
+    const availHeight = parent.clientHeight;
+    const scale = Math.min(availWidth / naturalWidth, availHeight / naturalHeight, 1);
+    const offsetX = Math.max(0, (availWidth - naturalWidth * scale) / 2);
+    const offsetY = Math.max(0, (availHeight - naturalHeight * scale) / 2);
+    wrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+  };
+
   // スライドナビゲーション関数
   const navigateSlide = (direction: 'prev' | 'next') => {
     if (!iframeRef.current || !iframeRef.current.contentWindow) return;
@@ -492,6 +543,8 @@ export default function ChatPage() {
       });
 
       setCurrentSlideIndex(newIndex);
+      // スライドが変わったら再フィット
+      fitSlideIframe();
 
       // iframe内にpreviousSlide/nextSlide関数があれば呼び出す
       interface SlideNavigationWindow extends Window {
@@ -631,6 +684,30 @@ export default function ChatPage() {
         } else if (e.key === 'ArrowRight') {
           navigateSlide('next');
         }
+      });
+      
+      // 初回フィット + リサイズ監視（iframe内部をスケール）
+      fitSlideIframe();
+      const ro = new ResizeObserver(() => fitSlideIframe());
+      if (iframeRef.current?.parentElement) ro.observe(iframeRef.current.parentElement);
+      // コンテンツ側のサイズ変化にも追従
+      const contentWrapper = iframeDocument.getElementById('slide-fit-wrapper');
+      let roContent: ResizeObserver | null = null;
+      if (contentWrapper) {
+        roContent = new ResizeObserver(() => fitSlideIframe());
+        roContent.observe(contentWrapper);
+      }
+      window.addEventListener('resize', fitSlideIframe);
+
+      // Cleanup when component unmounts or iframe navigates away
+      const cleanup = () => {
+        ro.disconnect();
+        roContent?.disconnect();
+        window.removeEventListener('resize', fitSlideIframe);
+      };
+      // If the iframe document becomes hidden/unloaded, cleanup observers
+      iframeDocument.addEventListener('visibilitychange', () => {
+        if (iframeDocument.visibilityState === 'hidden') cleanup();
       });
     } catch (error) {
       console.error('iframeロードエラー:', error);
@@ -897,20 +974,7 @@ export default function ChatPage() {
                 AI アシスタント
               </h1>
             </div>
-            
-            {/* ツールモード切替 */}
-            <div className="relative">
-              <div className="flex items-center gap-2 px-2 py-2 bg-secondary text-foreground rounded-xl border">
-                <label className="text-sm">モード</label>
-                <select
-                  className="bg-transparent outline-none text-sm"
-                  value={'workflow'}
-                  onChange={() => { /* no-op: ネットワークは廃止 */ }}
-                >
-                  <option value="workflow">ワークフロー</option>
-                </select>
-              </div>
-            </div>
+            {/* ツールモード切替は現在ワークフローのみのため非表示 */}
             {/* Reasoning 設定（対応モデルのみ表示） */}
             {(() => {
               const current = models.find(m => m.key === selectedModel);
@@ -1296,7 +1360,9 @@ export default function ChatPage() {
                     )}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 mt-1">
+                <div className={`flex items-center gap-2 mt-1 ${
+                  message.role === "user" ? "justify-end" : "justify-start"
+                }`}>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {message.timestamp.toLocaleTimeString("ja-JP", {
                       hour: "2-digit",
